@@ -1325,6 +1325,55 @@ interface BuildEntry {
 
 const BUILD_HISTORY: BuildEntry[] = [
   {
+    version: "1.4.1",
+    date: "2026-08-05",
+    description: "Audit bezopasnosti: zakrytie uyazvimostey",
+    changes: [
+      "session.ts: KEY_SECRET from process.env.SESSION_SECRET instead of hardcoded",
+      "route.ts: getListingByIdAdmin in ADMIN_ONLY",
+      "route.ts: addListingImage/removeListingImage verify listing owner",
+      "route.ts: addBooking/addReview in OWNER_PARAM",
+      "route.ts: updateBookingStatus verify booking participant",
+      "route.ts: incrementPromoClick/getListingStats require session",
+      "route.ts: createMessagesTable removed DROP TABLE",
+      "middleware.ts: /admin protected via verifySessionToken",
+      "db.ts: sanitizeUser removes password_hash and verification_code",
+      "upload/route.ts: magic byte check (jpg/png/webp), max 2MB",
+      "db.ts: dbUpdateBanner column whitelist",
+      "pg.ts: mandatory DB_PASSWORD",
+    ],
+    hash: "8f5682e"
+  },
+  {
+    version: "1.4.0",
+    date: "2026-08-05",
+    description: "Server session: HMAC cookie, user sanitization, admin security",
+    changes: [
+      "session.ts: Web Crypto API, HMAC-SHA256 cookie signing, Edge-compatible",
+      "route.ts: ADMIN_ONLY for 22 actions, OWNER_PARAM for 16 actions",
+      "route.ts: createSession on login/register, clearSession on logout",
+      "route.ts: sanitizeUser on profile returns (no password_hash/code)",
+      "middleware.ts: block /admin without valid session",
+      "db.ts: dbGetAllProfiles maps through sanitizeUser",
+      ".env.local: SESSION_SECRET via openssl rand -hex 32",
+    ],
+    hash: "3203b8c"
+  },
+  {
+    version: "1.3.1",
+    date: "2026-08-04",
+    description: "Admin: view unverified listings, upload fix",
+    changes: [
+      "Admin: view button for pending/unverified listings",
+      "db.ts: dbGetListingByIdAdmin without active/verified filter",
+      "route.ts: getListingByIdAdmin action",
+      "Client page.tsx: fix verified field check",
+      "Upload: fix path in public/uploads",
+    ],
+    hash: "d76be8e"
+  },
+
+  {
     version: "1.3.0",
     date: "2026-08-04",
     description: "Исправление карточек + переезд на конфигурацию через env",
