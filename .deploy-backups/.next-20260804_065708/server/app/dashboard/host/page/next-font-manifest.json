@@ -1,0 +1,13 @@
+{
+  "pages": {},
+  "app": {
+    "[project]/.openclaw-autoclaw/agents/auto-designer/workspace/sakhalinstay/src/app/dashboard/host/page": [
+      "static/media/b0947914c9718a1e-s.p.1xjn85gt7t6qs.woff2",
+      "static/media/01e4147cff8141ee-s.p.3huc2loe0ie8a.woff2",
+      "static/media/9c72aa0f40e4eef8-s.p.1y4-pdgsjb-pw.woff2",
+      "static/media/83afe278b6a6bb3c-s.p.2bn3s6zvc0dyp.woff2"
+    ]
+  },
+  "appUsingSizeAdjust": true,
+  "pagesUsingSizeAdjust": false
+}

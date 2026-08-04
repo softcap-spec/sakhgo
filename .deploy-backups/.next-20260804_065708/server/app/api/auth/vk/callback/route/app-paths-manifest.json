@@ -1,0 +1,3 @@
+{
+  "/api/auth/vk/callback/route": "app/api/auth/vk/callback/route.js"
+}

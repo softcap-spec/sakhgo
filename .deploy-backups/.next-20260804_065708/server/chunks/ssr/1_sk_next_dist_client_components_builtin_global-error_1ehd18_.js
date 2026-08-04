@@ -1,0 +1,3 @@
+module.exports=[24056,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(3154);a.n(d("[project]/.openclaw-autoclaw/agents/auto-designer/workspace/sakhalinstay/node_modules/next/dist/client/components/builtin/global-error.js <module evaluation>"))},81743,(a,b,c)=>{let{createClientModuleProxy:d}=a.r(3154);a.n(d("[project]/.openclaw-autoclaw/agents/auto-designer/workspace/sakhalinstay/node_modules/next/dist/client/components/builtin/global-error.js"))},21132,a=>{"use strict";a.i(24056);var b=a.i(81743);a.n(b)},95851,a=>{a.n(a.i(21132))}];
+
+//# sourceMappingURL=1_sk_next_dist_client_components_builtin_global-error_1ehd18_.js.map

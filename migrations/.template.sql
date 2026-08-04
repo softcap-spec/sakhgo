@@ -1,0 +1,53 @@
+-- =============================================================================
+-- SakhGO Migration Template
+-- =============================================================================
+--
+-- Naming convention: NNN_descriptive_name.sql
+--   NNN        — zero-padded 3-digit sequence number (001, 002, ... 010, ... 999)
+--   name       — lowercase, underscore-separated, short and descriptive
+--   Example:   001_init_types.sql, 042_add_listing_tags.sql
+--
+-- Rules:
+--   1. Every migration MUST be idempotent — safe to run multiple times.
+--      Use IF EXISTS / IF NOT EXISTS guards, DO blocks for types, etc.
+--   2. One logical change per migration. Don't mix schema changes with seed data.
+--   3. Never edit an already-run migration. Create a new one instead.
+--   4. Migrations run in numeric order. Once a file is recorded in the
+--      _migrations table, it is never re-run (even if changed).
+--   5. For data migrations (backfills, transformations), wrap in a transaction.
+--      Schema changes (DDL) auto-commit in PostgreSQL — plan accordingly.
+--
+-- Idempotent patterns:
+--
+--   Types (PostgreSQL doesn't support CREATE TYPE IF NOT EXISTS):
+--     DO $$ BEGIN
+--       CREATE TYPE my_type AS ENUM ('a', 'b');
+--     EXCEPTION WHEN duplicate_object THEN NULL;
+--     END $$;
+--
+--   Tables:
+--     CREATE TABLE IF NOT EXISTS public.my_table ( ... );
+--
+--   Columns:
+--     ALTER TABLE public.my_table ADD COLUMN IF NOT EXISTS col_name type;
+--
+--   Indexes:
+--     CREATE INDEX IF NOT EXISTS idx_name ON public.my_table (col);
+--
+--   Functions:
+--     CREATE OR REPLACE FUNCTION public.my_func() ...;
+--
+--   Triggers:
+--     DROP TRIGGER IF EXISTS trg_name ON public.my_table;
+--     CREATE TRIGGER trg_name ...;
+--
+--   FKs (when added later):
+--     DO $$ BEGIN
+--       ALTER TABLE public.child ADD CONSTRAINT fk_name
+--         FOREIGN KEY (col) REFERENCES public.parent(id);
+--     EXCEPTION WHEN duplicate_object THEN NULL;
+--     END $$;
+--
+-- =============================================================================
+
+-- TODO: Your migration SQL here

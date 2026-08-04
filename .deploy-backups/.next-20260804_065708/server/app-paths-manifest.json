@@ -1,0 +1,21 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/admin/page": "app/admin/page.js",
+  "/api/auth/vk/callback/route": "app/api/auth/vk/callback/route.js",
+  "/api/auth/vk/login/route": "app/api/auth/vk/login/route.js",
+  "/api/payments/webhook/route": "app/api/payments/webhook/route.js",
+  "/api/store/route": "app/api/store/route.js",
+  "/api/upload/route": "app/api/upload/route.js",
+  "/catalog/page": "app/catalog/page.js",
+  "/dashboard/create/page": "app/dashboard/create/page.js",
+  "/dashboard/host/create/page": "app/dashboard/host/create/page.js",
+  "/dashboard/host/edit/[id]/page": "app/dashboard/host/edit/[id]/page.js",
+  "/dashboard/host/page": "app/dashboard/host/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/dashboard/traveler/page": "app/dashboard/traveler/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/help/page": "app/help/page.js",
+  "/listings/[id]/page": "app/listings/[id]/page.js",
+  "/page": "app/page.js"
+}

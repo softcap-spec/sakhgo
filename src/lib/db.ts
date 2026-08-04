@@ -1,0 +1,1107 @@
+import pool from "./pg";
+import bcrypt from "bcryptjs";
+import { sendAdminEmailNotification } from "./email";
+import { sendTgNotification } from "./notify";
+
+// ── Profiles ──
+
+export async function dbGetProfile(email: string) {
+  const { rows } = await pool.query("SELECT * FROM profiles WHERE email = $1", [email]);
+  return rows[0] ?? null;
+}
+
+/** Login: verify password against bcrypt hash. Password is required. */
+export async function dbLogin(email: string, password: string) {
+  const user = await dbGetProfile(email);
+  if (!user) return null;
+  if (!user.password_hash) return null; // no password set = cannot log in
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return null;
+  return user;
+}
+
+export async function dbCreateProfile(profile: {
+  name: string; email: string; phone: string; password?: string;
+}) {
+  const passwordHash = profile.password ? await bcrypt.hash(profile.password, 12) : null;
+  // Generate 6-digit verification code
+  const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
+  const { rows } = await pool.query(
+    `INSERT INTO profiles (name, email, phone, password_hash, role, verification_code)
+     VALUES ($1, $2, $3, $4, 'user', $5)
+     RETURNING *`,
+    [profile.name, profile.email, profile.phone, passwordHash, verificationCode]
+  );
+  // Notify admin
+  dbAddAdminNotification("new_user", `Новый пользователь: ${profile.name} (${profile.email})`).catch(() => {});
+  return rows[0];
+}
+
+/** Change password: verify current password, then set new */
+export async function dbChangePassword(id: string, currentPassword: string, newPassword: string) {
+  const { rows } = await pool.query("SELECT password_hash FROM profiles WHERE id = $1", [id]);
+  if (!rows[0]) return { ok: false, error: "Пользователь не найден" };
+  if (rows[0].password_hash) {
+    const ok = await bcrypt.compare(currentPassword, rows[0].password_hash);
+    if (!ok) return { ok: false, error: "Неверный текущий пароль" };
+  }
+  const hash = await bcrypt.hash(newPassword, 12);
+  await pool.query("UPDATE profiles SET password_hash = $1, updated_at = now() WHERE id = $2", [hash, id]);
+  return { ok: true };
+}
+
+// ── Phone Verification ──
+
+/** Verify phone with code that was generated during registration or later */
+export async function dbVerifyPhone(email: string, code: string) {
+  const { rows } = await pool.query(
+    "SELECT id, verification_code FROM profiles WHERE email = $1",
+    [email]
+  );
+  if (!rows[0]) return { ok: false, error: "Пользователь не найден" };
+  if (!rows[0].verification_code) return { ok: false, error: "Код не был сгенерирован. Запросите новый код." };
+  if (rows[0].verification_code !== code) return { ok: false, error: "Неверный код подтверждения" };
+  await pool.query(
+    "UPDATE profiles SET phone_verified = true, verification_code = NULL, updated_at = now() WHERE email = $1",
+    [email]
+  );
+  return { ok: true };
+}
+
+/** Generate and store a new verification code, return it for display */
+export async function dbGenerateVerificationCode(email: string) {
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const { rows } = await pool.query(
+    "UPDATE profiles SET verification_code = $1, updated_at = now() WHERE email = $2 RETURNING id",
+    [code, email]
+  );
+  if (!rows[0]) return { ok: false, error: "Пользователь не найден" };
+  return { ok: true, code };
+}
+
+export async function dbUpdateProfile(id: string, data: Record<string, unknown>) {
+  const keys = Object.keys(data);
+  if (keys.length === 0) return null;
+  const setClauses = keys.map((k, i) => `${k} = $${i + 2}`);
+  const values = keys.map((k) => data[k]);
+  const { rows } = await pool.query(
+    `UPDATE profiles SET ${setClauses.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`,
+    [id, ...values]
+  );
+  return rows[0];
+}
+
+/** Admin: get all profiles */
+export async function dbGetAllProfiles() {
+  const { rows } = await pool.query("SELECT * FROM profiles ORDER BY created_at DESC");
+  return rows;
+}
+
+/** Admin: get all listings (including inactive/unverified) */
+export async function dbGetAllListings() {
+  const { rows } = await pool.query(
+    `SELECT l.*, p.name AS host_name, p.email AS host_email,
+            COALESCE(li.images, '{}'::text[]) AS images
+     FROM listings l
+     LEFT JOIN profiles p ON l.host_id = p.id
+     LEFT JOIN LATERAL (
+       SELECT array_agg(li.storage_path ORDER BY li.sort_order) AS images
+       FROM listing_images li
+       WHERE li.listing_id = l.id
+     ) li ON true
+     ORDER BY l.created_at DESC`
+  );
+  return rows;
+}
+
+/** Admin: update any listing directly */
+export async function dbAdminUpdateListing(id: string, data: Record<string, unknown>) {
+  const keys = Object.keys(data);
+  if (keys.length === 0) return null;
+  const setClauses = keys.map((k, i) => `${k} = $${i + 2}`);
+  const values = keys.map((k) => data[k]);
+  const { rows } = await pool.query(
+    `UPDATE listings SET ${setClauses.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`,
+    [id, ...values]
+  );
+  return rows[0];
+}
+
+// ── Listings (CRUD matching actual schema with listing_type enum) ──
+
+/** Public: get active + verified listings for catalog */
+export async function dbGetPublicListings(filters?: {
+  type?: string;
+  location?: string;
+  search?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  sort?: string;
+  limit?: number;
+  offset?: number;
+}) {
+  let conditions = "WHERE active = true AND verified = true";
+  const params: unknown[] = [];
+  let i = 1;
+  let hasSearch = false;
+
+  if (filters?.type) {
+    conditions += ` AND type = $${i++}`;
+    params.push(filters.type);
+  }
+  if (filters?.location) {
+    conditions += ` AND location = $${i++}`;
+    params.push(filters.location);
+  }
+  if (filters?.search) {
+    hasSearch = true;
+    conditions += ` AND search_vector @@ plainto_tsquery('russian', $${i++})`;
+    params.push(filters.search);
+  }
+  if (filters?.minPrice != null) {
+    conditions += ` AND price >= $${i++}`;
+    params.push(filters.minPrice);
+  }
+  if (filters?.maxPrice != null) {
+    conditions += ` AND price <= $${i++}`;
+    params.push(filters.maxPrice);
+  }
+
+  const rankCol = hasSearch ? `, ts_rank(search_vector, plainto_tsquery('russian', $${i})) as rank` : "";
+
+  let order = "ORDER BY rating DESC NULLS LAST, views DESC";
+  if (hasSearch) order = "ORDER BY rank DESC, rating DESC NULLS LAST";
+  else if (filters?.sort === "price_asc") order = "ORDER BY price ASC";
+  else if (filters?.sort === "rating") order = "ORDER BY rating DESC NULLS LAST, views DESC";
+  // "top" = promoted first
+  else if (filters?.sort === "top") order = "ORDER BY promo IS NOT NULL DESC, rating DESC NULLS LAST, views DESC";
+
+  const query = `SELECT id, host_id AS "hostId", title, slug, type, location, price,
+            price_unit AS "priceUnit", rating, reviews_count AS "reviewsCount",
+            views, bookings_count AS "bookingsCount", active, verified,
+            promo, cover_image AS "coverImage", description,
+            max_guests AS "maxGuests", rooms_count AS "roomsCount",
+            beds_count AS "bedsCount", amenities,
+            requires_border_permit AS "requiresBorderPermit",
+            season, transport_type AS "transportType",
+            tour_duration_hours AS "tourDurationHours",
+            tour_duration_days AS "tourDurationDays",
+            difficulty_level AS "difficultyLevel", includes,
+            fishing_type AS "fishingType", fish_species AS "fishSpecies",
+            fishing_method AS "fishingMethod", gear_included AS "gearIncluded",
+            catch_guarantee AS "catchGuarantee", license_required AS "licenseRequired",
+            boat_included AS "boatIncluded", meals_included AS "mealsIncluded",
+            gear_condition AS "gearCondition",
+            created_at AS "createdAt", updated_at AS "updatedAt"${rankCol},
+            COALESCE(li.images, '{}'::text[]) AS images
+     FROM listings
+     LEFT JOIN LATERAL (
+       SELECT array_agg(li.storage_path ORDER BY li.sort_order) AS images
+       FROM listing_images li
+       WHERE li.listing_id = listings.id
+     ) li ON true
+     ${conditions} ${order}
+     LIMIT $${i++} OFFSET $${i}`;
+
+  const { rows } = await pool.query(
+    query,
+    [...params, filters?.limit ?? 50, filters?.offset ?? 0]
+  );
+  return rows;
+}
+
+/** Public: get total count for pagination */
+export async function dbGetPublicListingsCount(filters?: {
+  type?: string;
+  location?: string;
+  search?: string;
+  minPrice?: number;
+  maxPrice?: number;
+}) {
+  let conditions = "WHERE active = true AND verified = true";
+  const params: unknown[] = [];
+  let i = 1;
+
+  if (filters?.type) {
+    conditions += ` AND type = $${i++}`;
+    params.push(filters.type);
+  }
+  if (filters?.location) {
+    conditions += ` AND location = $${i++}`;
+    params.push(filters.location);
+  }
+  if (filters?.search) {
+    conditions += ` AND search_vector @@ plainto_tsquery('russian', $${i++})`;
+    params.push(filters.search);
+  }
+  if (filters?.minPrice != null) {
+    conditions += ` AND price >= $${i++}`;
+    params.push(filters.minPrice);
+  }
+  if (filters?.maxPrice != null) {
+    conditions += ` AND price <= $${i++}`;
+    params.push(filters.maxPrice);
+  }
+
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM listings ${conditions}`,
+    params
+  );
+  return rows[0]?.total ?? 0;
+}
+
+/** Public: get single listing by slug or id */
+/** Public: get single listing by slug or id (only active + verified) */
+export async function dbGetListingById(id: string) {
+  return await _dbGetListingByIdCore(id, true);
+}
+
+/** Admin: get any listing by id (including pending/unverified) */
+export async function dbGetListingByIdAdmin(id: string) {
+  return await _dbGetListingByIdCore(id, false);
+}
+
+async function _dbGetListingByIdCore(id: string, publicOnly: boolean) {
+  const filter = publicOnly ? "AND l.active = true AND l.verified = true" : "";
+  const { rows } = await pool.query(
+    `SELECT l.id, l.host_id AS "hostId", l.title, l.slug, l.type, l.location, l.price,
+            l.price_unit AS "priceUnit", l.rating, l.reviews_count AS "reviewsCount",
+            l.views, l.bookings_count AS "bookingsCount", l.active, l.verified,
+            l.promo, l.cover_image AS "coverImage", l.description,
+            l.max_guests AS "maxGuests", l.rooms_count AS "roomsCount",
+            l.beds_count AS "bedsCount", l.amenities,
+            l.requires_border_permit AS "requiresBorderPermit",
+            l.season, l.transport_type AS "transportType",
+            l.tour_duration_hours AS "tourDurationHours",
+            l.tour_duration_days AS "tourDurationDays",
+            l.difficulty_level AS "difficultyLevel", l.includes,
+            l.fishing_type AS "fishingType", l.fish_species AS "fishSpecies",
+            l.fishing_method AS "fishingMethod", l.gear_included AS "gearIncluded",
+            l.catch_guarantee AS "catchGuarantee", l.license_required AS "licenseRequired",
+            l.boat_included AS "boatIncluded", l.meals_included AS "mealsIncluded",
+            l.gear_condition AS "gearCondition",
+            l.created_at AS "createdAt", l.updated_at AS "updatedAt",
+            COALESCE(li.images, '{}'::text[]) AS images,
+            p.name AS "hostName", p.avatar_url AS "hostAvatar", p.phone AS "hostPhone"
+     FROM listings l
+     LEFT JOIN profiles p ON l.host_id = p.id
+     LEFT JOIN LATERAL (
+       SELECT array_agg(li.storage_path ORDER BY li.sort_order) AS images
+       FROM listing_images li
+       WHERE li.listing_id = l.id
+     ) li ON true
+     WHERE l.id = $1 ${filter}`,
+    [id]
+  );
+  return rows[0] ?? null;
+}
+
+/** Host: get own listing by id (no active/verified filter) */
+export async function dbGetHostListingById(id: string, hostId: string) {
+  const { rows } = await pool.query(
+    `SELECT l.*, COALESCE(li.images, '{}'::text[]) AS images
+     FROM listings l
+     LEFT JOIN LATERAL (
+       SELECT array_agg(li.storage_path ORDER BY li.sort_order) AS images
+       FROM listing_images li
+       WHERE li.listing_id = l.id
+     ) li ON true
+     WHERE l.id = $1 AND l.host_id = $2`,
+    [id, hostId]
+  );
+  return rows[0] ?? null;
+}
+
+/** Host: get own listings */
+export async function dbGetMyListings(hostId: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId)) {
+    return [];
+  }
+  const { rows } = await pool.query(
+    `SELECT l.id, l.host_id AS "hostId", l.title, l.type, l.location, l.price,
+            l.price_unit AS "priceUnit", l.rating, l.views, l.bookings_count AS "bookingsCount",
+            l.active, l.verified, l.promo, l.cover_image AS "coverImage",
+            COALESCE(li.images, '{}'::text[]) AS images,
+            l.created_at AS "createdAt", l.updated_at AS "updatedAt"
+     FROM listings l
+     LEFT JOIN LATERAL (
+       SELECT array_agg(li.storage_path ORDER BY li.sort_order) AS images
+       FROM listing_images li
+       WHERE li.listing_id = l.id
+     ) li ON true
+     WHERE l.host_id = $1
+     ORDER BY l.created_at DESC`,
+    [hostId]
+  );
+  return rows;
+}
+
+/** Host: create listing (active=false, goes to moderation) */
+export async function dbAddListing(data: {
+  hostId: string;
+  title: string;
+  type: string;       // listing_type enum value: property|tour|fishing|rental_gear
+  location: string;
+  price: number;      // integer price in RUB
+  description?: string;
+  maxGuests?: number;
+  roomsCount?: number;
+  bedsCount?: number;
+  amenities?: string[];
+  coverImage?: string;
+  season?: string;
+  cancellationPolicy?: string;
+  // tour-specific
+  tourDurationHours?: number;
+  tourDurationDays?: number;
+  difficultyLevel?: string;
+  includes?: string[];
+  requiresBorderPermit?: boolean;
+  transportIncluded?: boolean;
+  // fishing-specific
+  fishingType?: string;
+  fishSpecies?: string[];
+  fishingMethod?: string;
+  gearIncluded?: boolean;
+  catchGuarantee?: string;
+  licenseRequired?: boolean;
+  boatIncluded?: boolean;
+  mealsIncluded?: boolean;
+  // rental_gear-specific
+  transportType?: string;
+  gearCondition?: string;
+}) {
+  const slug = data.title
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100)
+    + '-' + Math.random().toString(36).slice(2, 8);
+
+  const { rows } = await pool.query(
+    `INSERT INTO listings (
+       host_id, title, slug, type, location, price,
+       description, max_guests, rooms_count, beds_count,
+       amenities, cover_image, season,
+       requires_border_permit,
+       tour_duration_hours, tour_duration_days, difficulty_level,
+       includes,
+       fishing_type, fish_species, fishing_method,
+       gear_included, catch_guarantee, license_required,
+       boat_included, meals_included,
+       transport_type, gear_condition,
+       active, verified
+     ) VALUES (
+       $1,$2,$3,$4,$5,$6,
+       $7,$8,$9,$10,
+       $11,$12,$13,
+       $14,
+       $15,$16,$17,
+       $18,
+       $19,$20,$21,
+       $22,$23,$24,
+       $25,$26,
+       $27,$28,
+       false, false
+     ) RETURNING id`,
+    [
+      data.hostId, data.title, slug, data.type, data.location, data.price,
+      data.description ?? null, data.maxGuests ?? null, data.roomsCount ?? null, data.bedsCount ?? null,
+      data.amenities ?? null, data.coverImage ?? null, data.season ?? null,
+      data.requiresBorderPermit ?? false,
+      data.tourDurationHours ?? null, data.tourDurationDays ?? null, data.difficultyLevel ?? null,
+      data.includes ?? null,
+      data.fishingType ?? null, data.fishSpecies ?? null, data.fishingMethod ?? null,
+      data.gearIncluded ?? false, data.catchGuarantee ?? null, data.licenseRequired ?? false,
+      data.boatIncluded ?? false, data.mealsIncluded ?? false,
+      data.transportType ?? null, data.gearCondition ?? null
+    ]
+  );
+  return rows[0];
+}
+
+/** Host: update listing (sets verified=false, triggers re-moderation) */
+export async function dbUpdateListing(id: string, hostId: string, patch: Record<string, unknown>) {
+  const keys = Object.keys(patch);
+  if (keys.length === 0) return;
+  // Only reset verified if content changed (not just promo)
+  const isPromoOnly = keys.length === 1 && keys[0] === "promo";
+  const setClauses = [...keys.map((k, i) => `${k} = $${i + 3}`)];
+  if (!isPromoOnly) setClauses.push("verified = false");
+  const values = keys.map((k) => patch[k]);
+  await pool.query(
+    `UPDATE listings SET ${setClauses.join(", ")}, updated_at = now()
+     WHERE id = $1 AND host_id = $2`,
+    [id, hostId, ...values]
+  );
+}
+
+/** Admin: approve listing (set verified=true, active=true) */
+export async function dbApproveListing(id: string) {
+  await pool.query(
+    `UPDATE listings SET verified = true, active = true, updated_at = now() WHERE id = $1`,
+    [id]
+  );
+}
+
+/** Host: delete own listing */
+export async function dbRemoveListing(id: string, hostId: string) {
+  await pool.query("DELETE FROM listings WHERE id = $1 AND host_id = $2", [id, hostId]);
+}
+
+// ── Listing Images ──
+
+export async function dbAddListingImage(listingId: string, storagePath: string, sortOrder: number) {
+  await pool.query(
+    `INSERT INTO listing_images (listing_id, storage_path, sort_order) VALUES ($1, $2, $3)
+     ON CONFLICT DO NOTHING`,
+    [listingId, storagePath, sortOrder]
+  );
+}
+
+export async function dbRemoveListingImage(listingId: string, storagePath: string) {
+  await pool.query(
+    "DELETE FROM listing_images WHERE listing_id = $1 AND storage_path = $2",
+    [listingId, storagePath]
+  );
+}
+
+export async function dbGetListingImages(listingId: string) {
+  const { rows } = await pool.query(
+    "SELECT storage_path FROM listing_images WHERE listing_id = $1 ORDER BY sort_order",
+    [listingId]
+  );
+  return rows.map((r: any) => r.storage_path);
+}
+
+// ── Reviews ──
+
+export async function dbGetReviews(listingId: string) {
+  const { rows } = await pool.query(
+    `SELECT id, listing_id AS "listingId", booking_id AS "bookingId",
+            guest_id AS "guestId", guest_name AS "guestName", guest_avatar AS "guestAvatar",
+            rating, text, moderated, created_at AS "createdAt"
+     FROM reviews WHERE listing_id = $1 AND moderated = true
+     ORDER BY created_at DESC`,
+    [listingId]
+  );
+  return rows;
+}
+
+export async function dbAddReview(data: {
+  listingId: string; bookingId?: string; guestId: string;
+  guestName: string; guestAvatar?: string; rating: number; text: string;
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO reviews (listing_id, booking_id, guest_id, guest_name, guest_avatar, rating, text, moderated)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,false) RETURNING *`,
+    [data.listingId, data.bookingId || null, data.guestId, data.guestName, data.guestAvatar || null, data.rating, data.text]
+  );
+  // Notify admin
+  dbAddAdminNotification("new_review", `Новый отзыв на модерации от ${data.guestName}`,
+    `/admin?tab=moderation`).catch(() => {});
+  return rows[0];
+}
+
+export async function dbGetPendingReviews() {
+  const { rows } = await pool.query(
+    `SELECT r.*, p.name AS "guestName", p.avatar_url AS "guestAvatar"
+     FROM reviews r LEFT JOIN profiles p ON r.guest_id = p.id
+     WHERE r.moderated = false ORDER BY r.created_at DESC`
+  );
+  return rows;
+}
+
+export async function dbModerateReview(id: string, approved: boolean) {
+  if (approved) {
+    await pool.query("UPDATE reviews SET moderated = true WHERE id = $1", [id]);
+  } else {
+    await pool.query("DELETE FROM reviews WHERE id = $1", [id]);
+  }
+}
+
+// ── Bookings ──
+
+export async function dbGetMyBookings(guestId: string) {
+  // Validate UUID format to avoid SQL errors from non-UUID store IDs
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(guestId)) {
+    return [];
+  }
+  const { rows } = await pool.query(
+    `SELECT id, listing_id AS "listingId", listing_title AS "listingTitle",
+            listing_type AS "listingType", location, guest_id AS "guestId",
+            guest_name AS "guestName", host_name AS "hostName",
+            check_in::text AS "checkIn", check_out::text AS "checkOut",
+            guests, total_price AS "totalPrice", status,
+            created_at::text AS "createdAt"
+     FROM bookings WHERE guest_id = $1 ORDER BY created_at DESC`,
+    [guestId]
+  );
+  return rows;
+}
+
+export async function dbAddBooking(data: {
+  listingId: string; listingTitle: string; listingType: string; location: string;
+  guestId: string; guestName: string; hostName: string; hostId: string;
+  checkIn: string; checkOut: string; guests: number; totalPrice: number;
+  guestMessage?: string;
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO bookings (listing_id, listing_title, listing_type, location,
+            guest_id, guest_name, host_id, host_name, check_in, check_out,
+            guests, total_price, guest_message)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+    [data.listingId, data.listingTitle, data.listingType, data.location,
+     data.guestId, data.guestName, data.hostId, data.hostName,
+     data.checkIn, data.checkOut, data.guests, data.totalPrice, data.guestMessage ?? null]
+  );
+  // Notify admin & host
+  dbAddAdminNotification("new_booking", `Новая бронь: ${data.listingTitle} → ${data.guestName}`,
+    `/dashboard`).catch(() => {});
+  return rows[0];
+}
+
+export async function dbUpdateBookingStatus(id: string, status: string) {
+  await pool.query("UPDATE bookings SET status = $2 WHERE id = $1", [id, status]);
+}
+
+// ── Banners ──
+
+export async function dbGetBanners() {
+  const { rows } = await pool.query(
+    `SELECT id, title, image_url AS "imageUrl", link_url AS "linkUrl",
+            html_content AS "htmlContent", slot,
+            active, impressions, clicks, start_date::text AS "startDate",
+            end_date::text AS "endDate"
+     FROM banners ORDER BY created_at DESC`
+  );
+  return rows;
+}
+
+export async function dbAddBanner(data: {
+  title: string; imageUrl: string; linkUrl: string; htmlContent?: string; slot: string;
+  active?: boolean; startDate?: string | null; endDate?: string | null;
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO banners (title, image_url, link_url, html_content, slot, active, start_date, end_date)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [
+      data.title, data.imageUrl || "", data.linkUrl, data.htmlContent ?? null, data.slot, data.active ?? true,
+      data.startDate || null, data.endDate || null
+    ]
+  );
+  return rows[0];
+}
+
+export async function dbUpdateBanner(id: string, patch: Record<string, unknown>) {
+  const keys = Object.keys(patch).filter(k => patch[k] !== undefined);
+  if (keys.length === 0) return;
+  const setClauses = keys.map((k, i) => `${k} = $${i + 2}`);
+  const values = keys.map((k) => patch[k]);
+  await pool.query(`UPDATE banners SET ${setClauses.join(", ")} WHERE id = $1`, [id, ...values]);
+}
+
+export async function dbRemoveBanner(id: string) {
+  await pool.query("DELETE FROM banners WHERE id = $1", [id]);
+}
+
+// ── Pending Edits ──
+
+export async function dbGetPendingEdits() {
+  const { rows } = await pool.query(
+    `SELECT id, listing_id AS "listingId", listing_title AS "listingTitle",
+            host_id AS "hostId", host_name AS "hostName", changes,
+            submitted_at::text AS "submittedAt", status
+     FROM pending_edits WHERE status = 'pending' ORDER BY submitted_at DESC`
+  );
+  return rows;
+}
+
+export async function dbAddPendingEdit(data: {
+  listingId: string; listingTitle: string; hostId: string; hostName: string;
+  changes: Record<string, unknown>;
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO pending_edits (listing_id, listing_title, host_id, host_name, changes)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [data.listingId, data.listingTitle, data.hostId, data.hostName, JSON.stringify(data.changes)]
+  );
+  // Notify admin
+  dbAddAdminNotification("new_edit", `Объявление на модерации: ${data.listingTitle}`,
+    `/listings/${data.listingId}`).catch(() => {});
+  return rows[0];
+}
+
+export async function dbApproveEdit(editId: string, listingId: string, changes: Record<string, string>) {
+  // Verify listing exists before proceeding
+  const { rows: listingRows } = await pool.query("SELECT id FROM listings WHERE id = $1", [listingId]);
+  if (!listingRows[0]) {
+    console.error(`[dbApproveEdit] Listing ${listingId} not found`);
+    await pool.query("UPDATE pending_edits SET status = 'rejected' WHERE id = $1", [editId]);
+    return;
+  }
+
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+  let i = 1;
+
+  // Valid listing column names (snake_case from schema)
+  const VALID_COLUMNS = new Set([
+    "title", "type", "location", "price",
+    "description", "max_guests", "rooms_count", "beds_count",
+    "amenities", "cover_image", "season",
+    "requires_border_permit",
+    "tour_duration_hours", "tour_duration_days", "difficulty_level",
+    "includes",
+    "fishing_type", "fish_species", "fishing_method",
+    "gear_included", "catch_guarantee", "license_required",
+    "boat_included", "meals_included",
+    "transport_type", "gear_condition",
+  ]);
+
+  // camelCase → snake_case mapping
+  const KEY_MAP: Record<string, string> = {
+    bedsCount: "beds_count", maxGuests: "max_guests", roomsCount: "rooms_count",
+    coverImage: "cover_image", tourDurationDays: "tour_duration_days",
+    tourDurationHours: "tour_duration_hours", difficultyLevel: "difficulty_level",
+    fishingType: "fishing_type", fishSpecies: "fish_species",
+    fishingMethod: "fishing_method", gearIncluded: "gear_included",
+    catchGuarantee: "catch_guarantee", licenseRequired: "license_required",
+    boatIncluded: "boat_included", mealsIncluded: "meals_included",
+    transportType: "transport_type", gearCondition: "gear_condition",
+    requiresBorderPermit: "requires_border_permit",
+    dependsOnWeather: "depends_on_weather", transportIncluded: "transport_included",
+    cancellationPolicy: "cancellation_policy", startPoint: "start_point",
+    groupSizeMin: "group_size_min", groupSizeMax: "group_size_max",
+  };
+
+  // Separate images from listing columns
+  let images: string[] | null = null;
+  for (const [k, v] of Object.entries(changes)) {
+    if (k === "images") {
+      if (Array.isArray(v)) {
+        images = v as any;
+      } else if (typeof v === "string") {
+        try { images = JSON.parse(v); } catch { images = [v]; }
+      }
+      continue;
+    }
+    if (k === "status") continue; // skip meta field
+    const col = KEY_MAP[k] || k;
+    if (!VALID_COLUMNS.has(col)) continue; // skip unknown columns
+    // Handle JSON-array fields
+    let value: unknown = v;
+    if (col === "amenities" || col === "includes" || col === "fish_species") {
+      if (typeof v === "string" && (v.startsWith("[") || v.startsWith('{"'))) {
+        try { value = JSON.parse(v); } catch { value = v; }
+      }
+    }
+    setClauses.push(`${col} = $${i}`);
+    values.push(value);
+    i++;
+  }
+
+  if (setClauses.length > 0) {
+    setClauses.push("verified = true");
+    values.push(listingId);
+    await pool.query(`UPDATE listings SET ${setClauses.join(", ")} WHERE id = $${i}`, values);
+  }
+
+  // Sync images into listing_images table
+  if (images !== null) {
+    await pool.query("DELETE FROM listing_images WHERE listing_id = $1", [listingId]);
+    for (let j = 0; j < images.length; j++) {
+      await pool.query(
+        "INSERT INTO listing_images (listing_id, storage_path, sort_order) VALUES ($1, $2, $3)",
+        [listingId, images[j], j]
+      );
+    }
+  }
+
+  await pool.query("UPDATE pending_edits SET status = 'approved' WHERE id = $1", [editId]);
+}
+
+export async function dbRejectEdit(editId: string) {
+  await pool.query("UPDATE pending_edits SET status = 'rejected' WHERE id = $1", [editId]);
+}
+
+// ── Help ──
+
+export async function dbGetHelpContent() {
+  const { rows } = await pool.query("SELECT key, content FROM help_content");
+  const map: Record<string, string> = {};
+  for (const row of rows) map[row.key] = row.content;
+  return map;
+}
+
+export async function dbSetHelpContent(key: string, content: string) {
+  await pool.query(
+    `INSERT INTO help_content (key, content, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (key) DO UPDATE SET content = $2, updated_at = now()`,
+    [key, content]
+  );
+}
+
+// ── Cross-sell suggestions ──
+export async function dbGetCrossSell(listingId: string) {
+  // same location first, then fallback to other locations
+  const qs = `SELECT l.id, l.title, l.type, l.location, l.price,
+      l.price_unit AS price_unit,
+      COALESCE(
+        (SELECT li.storage_path FROM listing_images li WHERE li.listing_id = l.id ORDER BY li.sort_order LIMIT 1),
+        l.cover_image
+      ) AS image
+    FROM listings l
+    WHERE l.active = true AND l.verified = true
+      AND l.id != $1
+      AND l.type != (SELECT type FROM listings WHERE id = $1 LIMIT 1)
+      AND l.location = (SELECT location FROM listings WHERE id = $1 LIMIT 1)
+    ORDER BY random() LIMIT 3`;
+
+  let { rows } = await pool.query(qs, [listingId]);
+
+  if (rows.length === 0) {
+    const qf = `SELECT l.id, l.title, l.type, l.location, l.price,
+        l.price_unit AS price_unit,
+        COALESCE(
+          (SELECT li.storage_path FROM listing_images li WHERE li.listing_id = l.id ORDER BY li.sort_order LIMIT 1),
+          l.cover_image
+        ) AS image
+      FROM listings l
+      WHERE l.active = true AND l.verified = true
+        AND l.id != $1
+        AND l.type != (SELECT type FROM listings WHERE id = $1 LIMIT 1)
+      ORDER BY random() LIMIT 3`;
+    const r2 = await pool.query(qf, [listingId]);
+    rows = r2.rows;
+  }
+
+  const PRIORITY: Record<string, number> = { car_rental: 1, property: 2, tour: 3, fishing: 4, rental_gear: 5 };
+  return rows.sort((a, b) => (PRIORITY[a.type] ?? 99) - (PRIORITY[b.type] ?? 99)).slice(0, 3);
+}
+
+// ── Messages (Chat) ──
+
+export async function dbSendMessage(listingId: string, senderId: string, senderName: string, receiverId: string, text: string) {
+  const { rows } = await pool.query(
+    `INSERT INTO messages (listing_id, sender_id, receiver_id, text) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [listingId, senderId, receiverId, text]
+  );
+  return rows[0] ?? null;
+}
+
+export async function dbGetMessages(listingId: string, userId: string, otherId: string) {
+  const { rows } = await pool.query(
+    `SELECT m.*, p.name AS sender_name, p.avatar_url AS sender_avatar
+     FROM messages m
+     LEFT JOIN profiles p ON m.sender_id = p.id
+     WHERE m.listing_id = $1 AND ((m.sender_id = $2 AND m.receiver_id = $3) OR (m.sender_id = $3 AND m.receiver_id = $2))
+     ORDER BY m.created_at ASC`,
+    [listingId, userId, otherId]
+  );
+  return rows;
+}
+
+export async function dbGetChatList(userId: string) {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (m.listing_id, CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END)
+       m.listing_id, l.title AS listing_title,
+       COALESCE(
+         (SELECT li.storage_path FROM listing_images li WHERE li.listing_id = l.id ORDER BY li.sort_order LIMIT 1),
+         l.cover_image
+       ) AS listing_image,
+       CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END AS other_id,
+       CASE WHEN m.sender_id = $1 THEN rp.name ELSE sp.name END AS other_name,
+       CASE WHEN m.sender_id = $1 THEN rp.avatar_url ELSE sp.avatar_url END AS other_avatar,
+       (SELECT msg.text FROM messages msg WHERE msg.listing_id = m.listing_id AND ((msg.sender_id = $1 AND msg.receiver_id = CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END) OR (msg.sender_id = CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END AND msg.receiver_id = $1)) ORDER BY msg.created_at DESC LIMIT 1) AS last_message,
+       TO_CHAR(m.created_at, 'HH24:MI') AS last_time,
+       (SELECT COUNT(*) FROM messages um WHERE um.listing_id = m.listing_id AND um.receiver_id = $1 AND um.sender_id = CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END AND um.read = false)::int AS unread
+     FROM messages m
+     JOIN listings l ON l.id = m.listing_id
+     LEFT JOIN profiles sp ON sp.id = m.sender_id
+     LEFT JOIN profiles rp ON rp.id = m.receiver_id
+     WHERE m.sender_id = $1 OR m.receiver_id = $1
+     ORDER BY m.listing_id, (CASE WHEN m.sender_id = $1 THEN m.receiver_id ELSE m.sender_id END), m.created_at DESC`,
+    [userId]
+  );
+  return rows;
+}
+
+export async function dbMarkMessagesRead(listingId: string, userId: string, otherId: string) {
+  await pool.query(
+    `UPDATE messages SET read = true WHERE listing_id = $1 AND sender_id = $2 AND receiver_id = $3 AND read = false`,
+    [listingId, otherId, userId]
+  );
+}
+
+// ── Quick Pick Counts (Homepage) ──
+export async function dbGetQuickPickCounts() {
+  const picks = [
+    { id: "mountain", label: "Жильё", types: ["property"], locations: ["Южно-Сахалинск"] },
+    { id: "sea", label: "Морские выходы", types: ["tour", "fishing"], locations: ["Корсаков", "Невельск", "Холмск"] },
+    { id: "jeep", label: "Джип-туры", types: ["tour"], locations: ["Корсаков", "Курильск", "Южно-Сахалинск"] },
+    { id: "fishing", label: "Рыбалка", types: ["fishing"], locations: [] },
+    { id: "car_rental", label: "Прокат авто", types: ["car_rental"], locations: [] },
+  ];
+  const result: { id: string; label: string; count: number; coverImage: string | null }[] = [];
+  for (const p of picks) {
+    const typePlaceholders = p.types.map((_, i) => `$${i + 1}`);
+    const locConditions = p.locations.length > 0
+      ? `OR l.location IN (${p.locations.map((_, i) => `$${p.types.length + i + 1}`).join(", ")})`
+      : "";
+    const params: (string | number)[] = [...p.types, ...p.locations];
+    // Pick a random listing that actually has an image (either listing_images or cover_image),
+    // preferring the primary type for the category.
+    const query = `
+      WITH pick_listings AS (
+        SELECT l.id, l.cover_image,
+          CASE WHEN l.type = $1 THEN 0 ELSE 1 END AS type_rank
+        FROM listings l
+        WHERE l.active = true AND l.verified = true
+          AND (l.type IN (${typePlaceholders.join(", ")}) ${locConditions})
+      ),
+      cnt AS (SELECT COUNT(*)::int AS count FROM pick_listings),
+      img AS (
+        SELECT
+          COALESCE(li.storage_path, pl.cover_image) AS image
+        FROM pick_listings pl
+        LEFT JOIN LATERAL (
+          SELECT storage_path FROM listing_images
+          WHERE listing_id = pl.id ORDER BY sort_order LIMIT 1
+        ) li ON true
+        WHERE COALESCE(li.storage_path, pl.cover_image) IS NOT NULL
+        ORDER BY pl.type_rank, random() LIMIT 1
+      )
+      SELECT c.count, i.image FROM cnt c LEFT JOIN img i ON true
+    `;
+    const { rows } = await pool.query(query, params);
+    result.push({ id: p.id, label: p.label, count: rows[0]?.count ?? 0, coverImage: rows[0]?.image ?? null });
+  }
+  return result;
+}
+
+// ── Admin Notifications ──
+
+export async function dbGetAdminNotifications(limit = 50) {
+  const { rows } = await pool.query(
+    "SELECT * FROM admin_notifications ORDER BY created_at DESC LIMIT $1",
+    [limit]
+  );
+  return rows;
+}
+
+export async function dbGetUnreadNotificationCount() {
+  const { rows } = await pool.query(
+    "SELECT COUNT(*)::int as count FROM admin_notifications WHERE read = false"
+  );
+  return rows[0]?.count ?? 0;
+}
+
+export async function dbMarkNotificationRead(id: string) {
+  await pool.query(
+    "UPDATE admin_notifications SET read = true WHERE id = $1",
+    [id]
+  );
+}
+
+export async function dbMarkAllNotificationsRead() {
+  await pool.query(
+    "UPDATE admin_notifications SET read = true WHERE read = false"
+  );
+}
+
+export async function dbAddAdminNotification(type: string, text: string, link?: string) {
+  await pool.query(
+    "INSERT INTO admin_notifications (type, text, link) VALUES ($1, $2, $3)",
+    [type, text, link || null]
+  );
+  // Also send email + Telegram to admins (fire-and-forget)
+  sendAdminEmailNotification(type, text, link).catch((e) => console.error("[email] Failed:", e));
+  sendTgNotification(type as "new_user" | "new_booking" | "new_edit", text, link).catch(() => {});
+}
+
+// ── Email Notification Preferences ──
+
+export async function dbGetEmailNotificationPref(userId: string) {
+  const { rows } = await pool.query(
+    "SELECT COALESCE(email_notifications, true) as enabled FROM profiles WHERE id = $1",
+    [userId]
+  );
+  return rows[0]?.enabled ?? true;
+}
+
+export async function dbSetEmailNotificationPref(userId: string, enabled: boolean) {
+  await pool.query("UPDATE profiles SET email_notifications = $2 WHERE id = $1", [userId, enabled]);
+}
+
+// ── Listing Stats (views/contacts/bookings per day) ──
+
+export async function dbIncrementListingViews(listingId: string) {
+  await pool.query(
+    `INSERT INTO listing_stats (listing_id, date, views)
+     VALUES ($1, CURRENT_DATE, 1)
+     ON CONFLICT (listing_id, date) DO UPDATE SET views = listing_stats.views + 1`,
+    [listingId]
+  );
+  // Also bump the totals on listings
+  await pool.query("UPDATE listings SET views = COALESCE(views, 0) + 1 WHERE id = $1", [listingId]);
+}
+
+export async function dbGetListingStats(listingId: string, days: number = 7) {
+  const { rows } = await pool.query(
+    `SELECT date::text, views, contacts, bookings
+     FROM listing_stats
+     WHERE listing_id = $1 AND date >= CURRENT_DATE - $2::int
+     ORDER BY date ASC`,
+    [listingId, days]
+  );
+  return rows;
+}
+
+export async function dbGetHostStats(hostId: string, days: number = 7) {
+  const { rows } = await pool.query(
+    `SELECT SUM(ls.views)::int AS total_views,
+            SUM(ls.contacts)::int AS total_contacts,
+            SUM(ls.bookings)::int AS total_bookings,
+            COUNT(DISTINCT l.id)::int AS active_listings
+     FROM listing_stats ls
+     JOIN listings l ON l.id = ls.listing_id
+     WHERE l.host_id = $1 AND ls.date >= CURRENT_DATE - $2::int`,
+    [hostId, days]
+  );
+  return rows[0] || { total_views: 0, total_contacts: 0, total_bookings: 0, active_listings: 0 };
+}
+
+export async function dbGetHostListingStats(hostId: string, listingId: string, days: number = 7) {
+  // Generate full 7-day range with zeros for missing days
+  const { rows } = await pool.query(
+    `SELECT d.date::date::text AS date, COALESCE(ls.views, 0)::int AS views,
+            COALESCE(ls.contacts, 0)::int AS contacts,
+            COALESCE(ls.bookings, 0)::int AS bookings
+     FROM generate_series(CURRENT_DATE - $3::int, CURRENT_DATE, '1 day'::interval) AS d(date)
+     LEFT JOIN listing_stats ls ON ls.date = d.date AND ls.listing_id = $1
+     LEFT JOIN listings l ON l.id = ls.listing_id AND l.host_id = $2
+     ORDER BY d.date ASC`,
+    [listingId, hostId, days]
+  );
+  return rows;
+}
+
+// ── Promotions (admin) ──
+
+export async function dbGetAllPromotions() {
+  const { rows } = await pool.query(
+    `SELECT p.*, l.type AS listing_type, l.location
+     FROM promotions p
+     LEFT JOIN listings l ON l.id = p.listing_id
+     ORDER BY p.created_at DESC`
+  );
+  return rows;
+}
+
+export async function dbGetPromoPricing() {
+  const { rows } = await pool.query(
+    `SELECT promo_type, base_price_7d, base_price_14d, base_price_21d, base_price_30d, enabled
+     FROM promo_pricing ORDER BY promo_type`
+  );
+  return rows;
+}
+
+export async function dbUpdatePromoPricing(promoType: string, prices: {base_price_7d:number;base_price_14d:number;base_price_21d:number;base_price_30d:number;enabled:boolean}) {
+  await pool.query(
+    `UPDATE promo_pricing SET base_price_7d=$2, base_price_14d=$3, base_price_21d=$4, base_price_30d=$5, enabled=$6, updated_at=now()
+     WHERE promo_type=$1`,
+    [promoType, prices.base_price_7d, prices.base_price_14d, prices.base_price_21d, prices.base_price_30d, prices.enabled]
+  );
+}
+
+export async function dbUpdatePromotionStatus(id: string, status: string) {
+  const now = new Date().toISOString();
+  if (status === 'active') {
+    await pool.query("UPDATE promotions SET status=$2, started_at=$3, expires_at=$3::timestamptz + (duration_days || 7) * INTERVAL '1 day', updated_at=now() WHERE id=$1", [id, status, now]);
+  } else if (status === 'refunded' || status === 'cancelled') {
+    await pool.query("UPDATE promotions SET status=$2, expires_at=now(), updated_at=now() WHERE id=$1", [id, status]);
+  } else {
+    await pool.query("UPDATE promotions SET status=$2, updated_at=now() WHERE id=$1", [id, status]);
+  }
+}
+
+export async function dbCreatePromotion(data: {
+  listing_id:string; host_id:string; host_name:string; listing_title:string;
+  promo_type:string; duration_days:number; price:number;
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO promotions (listing_id, host_id, host_name, listing_title, promo_type, duration_days, price, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING *`,
+    [data.listing_id, data.host_id, data.host_name, data.listing_title, data.promo_type, data.duration_days, data.price]
+  );
+  return rows[0];
+}
+
+export async function dbIncrementPromoStats(listingId: string, field: "impressions" | "clicks" | "contacts" | "bookings_from_promo") {
+  await pool.query(
+    `UPDATE promotions SET ${field} = COALESCE(${field}, 0) + 1 WHERE listing_id = $1 AND status = 'active'`,
+    [listingId]
+  );
+}
+
+export async function dbExpirePromotions() {
+  // Find and expire promotions where status='active' and expires_at < now()
+  const { rows: expired } = await pool.query(
+    `UPDATE promotions
+     SET status = 'expired', updated_at = now()
+     WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < NOW()
+     RETURNING id, listing_id`
+  );
+
+  if (expired.length > 0) {
+    // Clear promo flag on related listings
+    const listingIds = expired.map((r: any) => r.listing_id);
+    await pool.query(
+      `UPDATE listings SET promo = NULL, updated_at = now()
+       WHERE id = ANY($1::uuid[])`,
+      [listingIds]
+    );
+  }
+
+  return expired.map((r: any) => r.id);
+}
+
+export async function dbGetPromoStats() {
+  const { rows } = await pool.query(
+    `SELECT
+       COUNT(*)::int AS total,
+       SUM(CASE WHEN status='active' THEN 1 ELSE 0 END)::int AS active,
+       SUM(CASE WHEN status='paid' THEN 1 ELSE 0 END)::int AS paid,
+       SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END)::int AS pending,
+       SUM(CASE WHEN status IN ('refunded','cancelled') THEN 1 ELSE 0 END)::int AS cancelled,
+       COALESCE(SUM(impressions),0)::int AS total_impressions,
+       COALESCE(SUM(clicks),0)::int AS total_clicks,
+       COALESCE(SUM(contacts),0)::int AS total_contacts,
+       COALESCE(SUM(bookings_from_promo),0)::int AS total_bookings,
+       COALESCE(SUM(CASE WHEN status IN ('paid','active') THEN price ELSE 0 END),0)::int AS total_revenue
+     FROM promotions`
+  );
+  return rows[0];
+}
+
+/** Seller: get own promotions */
+export async function dbGetMyPromotions(hostId: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId)) {
+    return [];
+  }
+  const { rows } = await pool.query(
+    `SELECT p.id, p.listing_id AS "listingId", p.listing_title AS "listingTitle",
+            p.promo_type AS "promoType", p.duration_days AS "durationDays",
+            p.price, p.status, p.impressions, p.clicks, p.contacts,
+            p.bookings_from_promo AS "bookingsFromPromo",
+            p.created_at::text AS "createdAt",
+            p.started_at::text AS "startedAt",
+            p.expires_at::text AS "expiresAt"
+     FROM promotions p
+     WHERE p.host_id = $1
+     ORDER BY p.created_at DESC`,
+    [hostId]
+  );
+  return rows;
+}

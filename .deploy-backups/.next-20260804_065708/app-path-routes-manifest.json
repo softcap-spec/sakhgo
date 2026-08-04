@@ -1,0 +1,21 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/admin/page": "/admin",
+  "/api/auth/vk/callback/route": "/api/auth/vk/callback",
+  "/api/auth/vk/login/route": "/api/auth/vk/login",
+  "/api/payments/webhook/route": "/api/payments/webhook",
+  "/api/store/route": "/api/store",
+  "/api/upload/route": "/api/upload",
+  "/catalog/page": "/catalog",
+  "/dashboard/create/page": "/dashboard/create",
+  "/dashboard/host/create/page": "/dashboard/host/create",
+  "/dashboard/host/edit/[id]/page": "/dashboard/host/edit/[id]",
+  "/dashboard/host/page": "/dashboard/host",
+  "/dashboard/page": "/dashboard",
+  "/dashboard/traveler/page": "/dashboard/traveler",
+  "/favicon.ico/route": "/favicon.ico",
+  "/help/page": "/help",
+  "/listings/[id]/page": "/listings/[id]",
+  "/page": "/"
+}

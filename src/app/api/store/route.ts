@@ -1,0 +1,483 @@
+import { NextRequest, NextResponse } from "next/server";
+import pool from "@/lib/pg";
+import { sendTgNotification, isTgConfigured } from "@/lib/notify";
+import {
+  dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
+  dbChangePassword,
+  dbVerifyPhone, dbGenerateVerificationCode,
+  dbGetPublicListings, dbGetPublicListingsCount, dbGetListingById, dbGetListingByIdAdmin, dbGetHostListingById,
+  dbGetMyListings, dbAddListing, dbUpdateListing, dbGetAllListings, dbAdminUpdateListing,
+  dbApproveListing, dbRemoveListing,
+  dbAddListingImage, dbRemoveListingImage, dbGetListingImages,
+  dbGetMyBookings, dbAddBooking, dbUpdateBookingStatus,
+  dbGetBanners, dbAddBanner, dbUpdateBanner, dbRemoveBanner,
+  dbGetPendingEdits, dbAddPendingEdit, dbApproveEdit, dbRejectEdit,
+  dbGetHelpContent, dbSetHelpContent,
+  dbGetAdminNotifications, dbGetUnreadNotificationCount,
+  dbMarkNotificationRead, dbMarkAllNotificationsRead,
+  dbGetReviews, dbAddReview, dbGetPendingReviews, dbModerateReview,
+  dbGetQuickPickCounts,
+  dbGetCrossSell,
+  dbSendMessage, dbGetMessages, dbGetChatList, dbMarkMessagesRead,
+  dbGetEmailNotificationPref, dbSetEmailNotificationPref,
+  dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
+  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbGetPromoStats,
+  dbExpirePromotions,
+  dbGetMyPromotions, dbIncrementPromoStats,
+} from "@/lib/db";
+
+export const dynamic = "force-dynamic";
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { action, ...params } = body;
+
+    switch (action) {
+
+      // ── Auth ──
+      case "login": {
+        const user = await dbLogin(params.email, params.password || "");
+        if (!user) return NextResponse.json({ ok: false, error: "Неверный email или пароль" });
+        return NextResponse.json({ ok: true, data: user });
+      }
+      case "register": {
+        const existing = await dbGetProfile(params.email);
+        if (existing) return NextResponse.json({ ok: false, error: "Email уже зарегистрирован" });
+        // Check phone uniqueness
+        if (params.phone) {
+          const phoneCheck = await pool.query("SELECT id FROM profiles WHERE phone = $1", [params.phone]);
+          if (phoneCheck.rows.length > 0) return NextResponse.json({ ok: false, error: "Номер телефона уже зарегистрирован" });
+        }
+        const user = await dbCreateProfile({
+          name: params.name, email: params.email, phone: params.phone || "", password: params.password
+        });
+        return NextResponse.json({ ok: true, data: user });
+      }
+      case "updateProfile": {
+        const user = await dbUpdateProfile(params.id, params.data);
+        return NextResponse.json({ ok: true, data: user });
+      }
+
+      case "getEmailNotificationPref": {
+        const pref = await dbGetEmailNotificationPref(params.userId);
+        return NextResponse.json({ ok: true, data: pref });
+      }
+      case "setEmailNotificationPref": {
+        await dbSetEmailNotificationPref(params.userId, params.enabled);
+        return NextResponse.json({ ok: true });
+      }
+      case "deleteProfile": {
+        await pool.query("DELETE FROM profiles WHERE id = $1", [params.userId]);
+        return NextResponse.json({ ok: true });
+      }
+
+      case "changePassword": {
+        const result = await dbChangePassword(params.id, params.currentPassword, params.newPassword);
+        if (!result.ok) return NextResponse.json({ ok: false, error: result.error });
+        return NextResponse.json({ ok: true, data: true });
+      }
+
+      // ── Phone Verification ──
+      case "verifyPhone": {
+        const result = await dbVerifyPhone(params.email, params.code);
+        if (!result.ok) return NextResponse.json({ ok: false, error: result.error });
+        return NextResponse.json({ ok: true, data: true });
+      }
+      case "generateVerificationCode": {
+        const result = await dbGenerateVerificationCode(params.email);
+        if (!result.ok) return NextResponse.json({ ok: false, error: result.error });
+        return NextResponse.json({ ok: true, data: result.code });
+      }
+
+      // ── Public listings (catalog) ──
+      case "getPublicListings": {
+        const listings = await dbGetPublicListings(params);
+        const total = await dbGetPublicListingsCount(params);
+        return NextResponse.json({ ok: true, data: { listings, total } });
+      }
+      case "getListingById": {
+        const listing = await dbGetListingById(params.id);
+        if (!listing) return NextResponse.json({ ok: false, error: "Объявление не найдено" }, { status: 404 });
+        // Increment view count in stats table (fire-and-forget)
+        dbIncrementListingViews(params.id).catch(() => {});
+        // Increment promo impressions if listing has an active promo (fire-and-forget)
+        if (listing.promo) {
+          dbIncrementPromoStats(params.id, "impressions").catch(() => {});
+        }
+        const images = await dbGetListingImages(params.id);
+        return NextResponse.json({ ok: true, data: { ...listing, images } });
+      }
+      case "getListingByIdAdmin": {
+        const listing = await dbGetListingByIdAdmin(params.id);
+        if (!listing) return NextResponse.json({ ok: false, error: "Ob'yavlenie ne naydeno" }, { status: 404 });
+        const images = await dbGetListingImages(params.id);
+        return NextResponse.json({ ok: true, data: { ...listing, images } });
+      }
+
+
+      case "getHostListingById": {
+        const hostListing = await dbGetHostListingById(params.id, params.hostId);
+        if (!hostListing) return NextResponse.json({ ok: false, error: "Объявление не найдено" }, { status: 404 });
+        return NextResponse.json({ ok: true, data: hostListing });
+      }
+
+      // ── Host listings ──
+      case "getMyListings": {
+        const listings = await dbGetMyListings(params.hostId);
+        return NextResponse.json({ ok: true, data: listings });
+      }
+      case "addListing": {
+        const listing = await dbAddListing(params);
+        // Save images if provided
+        if (params.images && Array.isArray(params.images)) {
+          for (let i = 0; i < params.images.length; i++) {
+            await dbAddListingImage(listing.id, params.images[i], i).catch(() => {});
+          }
+        }
+        return NextResponse.json({ ok: true, data: listing });
+      }
+      case "updateListing": {
+        await dbUpdateListing(params.id, params.hostId, params.patch);
+        // Re-sync images
+        if (params.images && Array.isArray(params.images)) {
+          import("@/lib/pg").then(({ default: pool }) => {
+            pool.query("DELETE FROM listing_images WHERE listing_id = $1", [params.id]).then(() => {
+              params.images.forEach((url: string, i: number) => {
+                dbAddListingImage(params.id, url, i).catch(() => {});
+              });
+            }).catch(() => {});
+          });
+        }
+        return NextResponse.json({ ok: true });
+      }
+      case "approveListing": {
+        await dbApproveListing(params.id);
+        return NextResponse.json({ ok: true });
+      }
+      case "removeListing": {
+        await dbRemoveListing(params.id, params.hostId);
+        return NextResponse.json({ ok: true });
+      }
+
+      // ── Images ──
+      case "addListingImage": {
+        await dbAddListingImage(params.listingId, params.url, params.sortOrder ?? 0);
+        return NextResponse.json({ ok: true });
+      }
+      case "removeListingImage": {
+        await dbRemoveListingImage(params.listingId, params.url);
+        return NextResponse.json({ ok: true });
+      }
+
+      // ── Bookings ──
+      case "getMyBookings": {
+        const bookings = await dbGetMyBookings(params.guestId);
+        return NextResponse.json({ ok: true, data: bookings });
+      }
+      case "addBooking": {
+        const booking = await dbAddBooking(params);
+        // Send email + TG notification to host
+        if (booking) {
+          try {
+            const { sendUserEmailNotification, dbUserEmailEnabled } = await import("@/lib/email");
+            const { dbGetListingById } = await import("@/lib/db");
+            const listing = await dbGetListingById(booking.listing_id);
+            if (listing?.host_id) {
+              const userPref = await dbUserEmailEnabled(listing.host_id);
+              if (userPref && userPref.enabled && userPref.email) {
+                const listingTitle = listing.title || "объявление";
+                const details = `${booking.guest_name || "Гость"} · ${booking.check_in || ""}–${booking.check_out || ""} · ${booking.guests || 1} чел. · ${booking.total_price || 0} ₽`;
+                await sendUserEmailNotification(
+                  userPref.email,
+                  "booking",
+                  listingTitle,
+                  booking.guest_name || "Гость",
+                  details,
+                  `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/listings/${booking.listing_id}`
+                );
+              }
+              // Try to send TG notification to host if they have a chat_id
+              try {
+                const hostRow = await pool.query(
+                  "SELECT telegram_chat_id FROM profiles WHERE id = $1",
+                  [listing.host_id]
+                );
+                if (hostRow.rows[0]?.telegram_chat_id) {
+                  const hostTgText = `📅 Новая бронь: ${listing.title || "объявление"}\nГость: ${booking.guest_name || "Гость"}\nДаты: ${booking.check_in || ""} – ${booking.check_out || ""}\nСумма: ${booking.total_price || 0} ₽`;
+                  // Use fetch directly to a different chat_id
+                  const token = process.env.TELEGRAM_BOT_TOKEN;
+                  if (token) {
+                    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        chat_id: hostRow.rows[0].telegram_chat_id,
+                        text: `<b>📅 СахGO · Новая бронь</b>\n${hostTgText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}`,
+                        parse_mode: "HTML",
+                      }),
+                    }).catch(() => {});
+                  }
+                }
+              } catch { /* TG host notification is best-effort */ }
+            }
+          } catch (e) { console.error("[api] addBooking notification error:", e); }
+        }
+        return NextResponse.json({ ok: true, data: booking });
+      }
+      case "updateBookingStatus": {
+        await dbUpdateBookingStatus(params.id, params.status);
+        return NextResponse.json({ ok: true });
+      }
+
+      // ── Banners ──
+      case "getBanners": {
+        const banners = await dbGetBanners();
+        return NextResponse.json({ ok: true, data: banners });
+      }
+      case "addBanner": {
+        const banner = await dbAddBanner(params);
+        return NextResponse.json({ ok: true, data: banner });
+      }
+      case "updateBanner": {
+        await dbUpdateBanner(params.id, params.patch);
+        return NextResponse.json({ ok: true });
+      }
+      case "removeBanner": {
+        await dbRemoveBanner(params.id);
+        return NextResponse.json({ ok: true });
+      }
+
+      // ── Pending Edits ──
+      case "getPendingEdits": {
+        const edits = await dbGetPendingEdits();
+        return NextResponse.json({ ok: true, data: edits });
+      }
+      case "addPendingEdit": {
+        const edit = await dbAddPendingEdit(params);
+        return NextResponse.json({ ok: true, data: edit });
+      }
+      case "approveEdit": {
+        await dbApproveEdit(params.editId, params.listingId, params.changes);
+        return NextResponse.json({ ok: true });
+      }
+      case "rejectEdit": {
+        await dbRejectEdit(params.editId);
+        return NextResponse.json({ ok: true });
+      }
+
+      // ── Help ──
+      case "getHelpContent": {
+        const content = await dbGetHelpContent();
+        return NextResponse.json({ ok: true, data: content });
+      }
+      case "setHelpContent": {
+        await dbSetHelpContent(params.key, params.value);
+        return NextResponse.json({ ok: true });
+      }
+
+      case "getAllProfiles": {
+        const profiles = await dbGetAllProfiles();
+        return NextResponse.json({ ok: true, data: profiles });
+      }
+
+      case "getAllListings": {
+        const listings = await dbGetAllListings();
+        return NextResponse.json({ ok: true, data: listings });
+      }
+
+      case "adminUpdateListing": {
+        const { id, data } = params as { id: string; data: Record<string, unknown> };
+        const updated = await dbAdminUpdateListing(id, data);
+        return NextResponse.json({ ok: true, data: updated });
+      }
+
+      // ── Reviews ──
+      case "getReviews": {
+        const reviews = await dbGetReviews(params.listingId as string);
+        return NextResponse.json({ ok: true, data: reviews });
+      }
+      case "addReview": {
+        const review = await dbAddReview(params as any);
+        return NextResponse.json({ ok: true, data: review });
+      }
+      case "getPendingReviews": {
+        const reviews = await dbGetPendingReviews();
+        return NextResponse.json({ ok: true, data: reviews });
+      }
+      case "moderateReview": {
+        await dbModerateReview(params.id as string, params.approved as boolean);
+        return NextResponse.json({ ok: true, data: true });
+      }
+
+      // ── Admin Notifications ──
+      case "getAdminNotifications": {
+        const list = await dbGetAdminNotifications();
+        return NextResponse.json({ ok: true, data: list });
+      }
+      case "getUnreadCount": {
+        const count = await dbGetUnreadNotificationCount();
+        return NextResponse.json({ ok: true, data: count });
+      }
+      case "markNotificationRead": {
+        await dbMarkNotificationRead(params.id as string);
+        return NextResponse.json({ ok: true, data: true });
+      }
+      case "markAllNotificationsRead": {
+        await dbMarkAllNotificationsRead();
+        return NextResponse.json({ ok: true, data: true });
+      }
+
+      // ── Listing Stats ──
+      case "getListingStats": {
+        const stats = await dbGetListingStats(params.listingId as string, (params.days as number) || 7);
+        return NextResponse.json({ ok: true, data: stats });
+      }
+      case "getHostStats": {
+        const host = await dbGetHostStats(params.hostId as string, (params.days as number) || 7);
+        return NextResponse.json({ ok: true, data: host });
+      }
+      case "getHostListingStats": {
+        const hsl = await dbGetHostListingStats(params.hostId as string, params.listingId as string, (params.days as number) || 7);
+        return NextResponse.json({ ok: true, data: hsl });
+      }
+
+      // ── Promotions ──
+      case "getAllPromotions": {
+        const promos = await dbGetAllPromotions();
+        return NextResponse.json({ ok: true, data: promos });
+      }
+      case "getPromoPricing": {
+        const prices = await dbGetPromoPricing();
+        return NextResponse.json({ ok: true, data: prices });
+      }
+      case "updatePromoPricing": {
+        await dbUpdatePromoPricing(params.promoType, params.prices);
+        return NextResponse.json({ ok: true });
+      }
+      case "updatePromotionStatus": {
+        await dbUpdatePromotionStatus(params.id, params.status);
+        return NextResponse.json({ ok: true });
+      }
+      case "createPromotion": {
+        const pm = await dbCreatePromotion(params);
+        return NextResponse.json({ ok: true, data: pm });
+      }
+      case "getPromoStats": {
+        const stats = await dbGetPromoStats();
+        return NextResponse.json({ ok: true, data: stats });
+      }
+      case "expirePromotions": {
+        const expiredIds = await dbExpirePromotions();
+        return NextResponse.json({ ok: true, data: { expired: expiredIds } });
+      }
+      case "getMyPromotions": {
+        const promos = await dbGetMyPromotions(params.hostId as string);
+        return NextResponse.json({ ok: true, data: promos });
+      }
+      case "incrementPromoClick": {
+        await dbIncrementPromoStats(params.listingId as string, "clicks");
+        return NextResponse.json({ ok: true, data: true });
+      }
+
+      case "getQuickPickCounts": {
+        const counts = await dbGetQuickPickCounts();
+        return NextResponse.json({ ok: true, data: counts });
+      }
+      case "getCrossSell": {
+        const items = await dbGetCrossSell(params.listingId as string);
+        return NextResponse.json({ ok: true, data: items });
+      }
+      case "sendMessage": {
+        const msg = await dbSendMessage(params.listingId as string, params.senderId as string, params.senderName as string, params.receiverId as string, params.text as string);
+        // Send email notification to receiver
+        if (params.listingId && params.receiverId) {
+          try {
+            const { sendUserEmailNotification, dbUserEmailEnabled } = await import("@/lib/email");
+            const userPref = await dbUserEmailEnabled(params.receiverId as string);
+            if (userPref && userPref.enabled && userPref.email) {
+              const { dbGetListingById } = await import("@/lib/db");
+              const listing = await dbGetListingById(params.listingId as string);
+              const listingTitle = listing?.title || "объявление";
+              const msgPreview = (params.text as string).length > 160
+                ? (params.text as string).substring(0, 160) + "..."
+                : params.text as string;
+              await sendUserEmailNotification(
+                userPref.email,
+                "message",
+                listingTitle,
+                params.senderName as string,
+                msgPreview,
+                `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/listings/${params.listingId}`
+              );
+            }
+          } catch (e) { console.error("[api] sendMessage notification error:", e); }
+        }
+        return NextResponse.json({ ok: true, data: msg });
+      }
+      case "getMessages": {
+        const msgs = await dbGetMessages(params.listingId as string, params.userId as string, params.otherId as string);
+        return NextResponse.json({ ok: true, data: msgs });
+      }
+      case "getChatList": {
+        const list = await dbGetChatList(params.userId as string);
+        return NextResponse.json({ ok: true, data: list });
+      }
+      case "markMessagesRead": {
+        await dbMarkMessagesRead(params.listingId as string, params.userId as string, params.otherId as string);
+        return NextResponse.json({ ok: true, data: true });
+      }
+      case "createMessagesTable": {
+        try { await pool.query('DROP TABLE IF EXISTS messages CASCADE'); } catch {}
+        await pool.query(`
+          CREATE TABLE messages (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            listing_id UUID REFERENCES listings(id) ON DELETE CASCADE,
+            sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            receiver_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+            text TEXT NOT NULL,
+            read BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          )
+        `);
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_listing ON messages(listing_id)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id)');
+        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_dialog ON messages(listing_id, sender_id, receiver_id)');
+        return NextResponse.json({ ok: true, data: true });
+      }
+
+      // ── Telegram Notifications ──
+      case "testTgNotification": {
+        if (!isTgConfigured()) {
+          return NextResponse.json({ ok: false, error: "Telegram не настроен. Установи TELEGRAM_BOT_TOKEN и TELEGRAM_ADMIN_CHAT_ID в .env.local" });
+        }
+        const ok = await sendTgNotification(
+          "test",
+          "Тестовое уведомление от SakhGO. Если вы это видите — Telegram-уведомления работают корректно."
+        );
+        return NextResponse.json({ ok, data: { sent: ok, message: ok ? "Тестовое уведомление отправлено" : "Ошибка отправки" } });
+      }
+      case "getTgNotificationPref": {
+        const { rows } = await pool.query(
+          "SELECT COALESCE(tg_notifications, false) as enabled FROM profiles WHERE id = $1",
+          [params.userId as string]
+        );
+        return NextResponse.json({ ok: true, data: rows[0]?.enabled ?? false });
+      }
+      case "setTgNotificationPref": {
+        await pool.query("UPDATE profiles SET tg_notifications = $2 WHERE id = $1", [
+          params.userId as string,
+          params.enabled as boolean,
+        ]);
+        return NextResponse.json({ ok: true });
+      }
+
+      default:
+        return NextResponse.json({ ok: false, error: `Unknown action: ${action}` }, { status: 400 });
+    }
+  } catch (e: any) {
+    console.error("API error:", e);
+    return NextResponse.json({ ok: false, error: e.message || "Internal error" }, { status: 500 });
+  }
+}
