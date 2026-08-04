@@ -92,7 +92,8 @@ async function verifyBookingParticipant(session: { userId: string; role: string 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, params = {} } = body;
+    const { action, params: explicitParams, ...rest } = body;
+    const params: any = explicitParams !== undefined ? explicitParams : rest;
     const session = await getSession();
 
     if (ADMIN_ONLY.has(action) && session?.role !== "admin") {
