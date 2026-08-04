@@ -15,6 +15,11 @@ async function call(action: string, params?: Record<string, unknown>) {
 }
 
 // ── Auth ──
+export const apiForgotPassword = (email: string) =>
+  call("forgotPassword", { email });
+export const apiResetPassword = (token: string, password: string) =>
+  call("resetPassword", { token, password });
+
 export const apiLogin = (email: string, password: string) =>
   call("login", { email, password });
 export const apiRegister = (name: string, email: string, phone: string, password: string) =>

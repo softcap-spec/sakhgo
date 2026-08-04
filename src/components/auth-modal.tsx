@@ -47,7 +47,7 @@ function formatPhoneInput(value: string): string {
 export function AuthModal() {
   const store = useStore();
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "register">(store.authMode);
+  const [mode, setMode] = useState<"login" | "register" | "forgot">(store.authMode);
 
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPass, setLoginPass] = useState("");
@@ -81,6 +81,20 @@ export function AuthModal() {
   const [verificationError, setVerificationError] = useState("");
   const [verificationSuccess, setVerificationSuccess] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotError, setForgotError] = useState("");
+
+  const handleForgot = async () => {
+    if (!forgotEmail.trim()) { setForgotError("\u0412\u0432\u0435\u0434\u0438\u0442\u0435 email"); return; }
+    setLoading(true); setForgotError("");
+    try {
+      const ok = await store.forgotPassword(forgotEmail.trim());
+      if (ok) { setForgotSent(true); }
+      else { setForgotError("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0441\u0441\u044b\u043b\u043a\u0443. \u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 email."); }
+    } catch { setForgotError("\u041e\u0448\u0438\u0431\u043a\u0430. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043f\u043e\u0437\u0436\u0435."); }
+    setLoading(false);
+  };
 
   const handleLogin = async () => {
     if (!loginEmail.trim() || !loginPass.trim()) return;
@@ -300,7 +314,29 @@ export function AuthModal() {
               </DialogTitle>
             </DialogHeader>
 
-            {mode === "login" ? (
+            : mode === "forgot" ? (
+              <div className="space-y-4 pt-2">
+                {forgotSent ? (
+                  <div className="text-center py-6">
+                    <CheckCircle className="mx-auto mb-3 text-green-500" size={40} />
+                    <p className="font-medium text-lg mb-1">Ссылка отправлена</p>
+                    <p className="text-sm text-muted-foreground mb-4">Проверьте почту {forgotEmail}. Ссылка действительна 1 час.</p>
+                    <button onClick={() => { setMode("login"); setForgotSent(false); }} className="text-accent font-medium hover:underline text-sm">Вернуться ко входу</button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">Введите email, и мы отправим ссылку для сброса пароля.</p>
+                    <div className="space-y-2">
+                      <Label>Email</Label>
+                      <Input type="email" placeholder="ivan@example.com" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} />
+                    </div>
+                    {forgotError && <p className="text-sm text-red-500">{forgotError}</p>}
+                    <Button className="w-full" onClick={handleForgot} disabled={loading}>{loading ? "Отправка..." : "Отправить ссылку"}</Button>
+                    <button onClick={() => setMode("login")} className="text-sm text-accent font-medium hover:underline block text-center w-full">← Вернуться ко входу</button>
+                  </>
+                )}
+              </div>
+            ) : {mode === "login" ? (
               <div className="space-y-4 pt-2">
                 <div className="space-y-2">
                   <Label>Email</Label>
@@ -322,6 +358,7 @@ export function AuthModal() {
                   {VK_ICON}
                   Войти через VK ID
                 </Button>
+                <button onClick={() => { setMode("forgot"); setForgotSent(false); setForgotError(""); }} className="text-sm text-muted-foreground hover:text-accent block text-center w-full mb-2">Забыли пароль?</button>
                 <p className="text-center text-sm text-muted-foreground">
                   Нет аккаунта?{" "}
                   <button onClick={() => setMode("register")} className="text-accent font-medium hover:underline">

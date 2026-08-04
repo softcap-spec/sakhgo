@@ -1,4 +1,5 @@
 import pool from "./pg";
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { sendAdminEmailNotification } from "./email";
 import { sendTgNotification } from "./notify";
@@ -25,6 +26,34 @@ export async function dbLogin(email: string, password: string) {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return null;
   return user;
+}
+
+/** Generate a password reset token. Returns { name, email, token } or null. */
+export async function dbCreatePasswordResetToken(email: string) {
+  const user = await dbGetProfile(email);
+  if (!user || !user.password_hash) return null;
+  const token = crypto.randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + 3600000); // 1 hour
+  await pool.query(
+    "UPDATE profiles SET password_reset_token = $1, password_reset_expires = $2 WHERE email = $3",
+    [token, expires.toISOString(), email]
+  );
+  return { name: user.name, email: user.email, token };
+}
+
+/** Verify reset token and set new password. Returns { id, email } or null. */
+export async function dbResetPassword(token: string, newPassword: string) {
+  const { rows } = await pool.query(
+    "SELECT id, email FROM profiles WHERE password_reset_token = $1 AND password_reset_expires > NOW()",
+    [token]
+  );
+  if (rows.length === 0) return null;
+  const hash = await bcrypt.hash(newPassword, 10);
+  await pool.query(
+    "UPDATE profiles SET password_hash = $1, password_reset_token = NULL, password_reset_expires = NULL WHERE id = $2",
+    [hash, rows[0].id]
+  );
+  return rows[0];
 }
 
 export async function dbCreateProfile(profile: {

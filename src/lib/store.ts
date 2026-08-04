@@ -175,7 +175,8 @@ interface AppState {
   authMode: "login" | "register";
 
   // ── Auth ──
-  login: (email: string, password: string) => Promise<AuthUser | null>;
+  forgotPassword: (email: string) => Promise<boolean>;
+      login: (email: string, password: string) => Promise<AuthUser | null>;
   register: (name: string, email: string, phone: string, password: string) => Promise<AuthUser | null>;
   logout: () => void;
 
@@ -262,6 +263,15 @@ export const useStore = create<AppState>()(
 
         // ── Auth ──
 
+        forgotPassword: async (email) => {
+          try {
+            await api.apiForgotPassword(email);
+            return true;
+          } catch (e: any) {
+            console.error("forgotPassword error:", e);
+            return false;
+          }
+        },
         login: async (email, password) => {
           try {
             const user = await api.apiLogin(email, password);

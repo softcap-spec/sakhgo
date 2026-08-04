@@ -26,6 +26,7 @@ import {
   dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbGetPromoStats,
   dbExpirePromotions,
   dbGetMyPromotions, dbIncrementPromoStats,
+  dbCreatePasswordResetToken, dbResetPassword,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -132,6 +133,30 @@ export async function POST(req: NextRequest) {
         await createSession(user.id, user.role || "user");
         return NextResponse.json({ ok: true, data: sanitizeUser(user) });
       }
+      // Password reset
+      case "forgotPassword": {
+        const resetEntry = await dbCreatePasswordResetToken(params.email);
+        if (!resetEntry) {
+          return NextResponse.json({ ok: false, error: "Если email зарегистрирован, ссылка отправлена." });
+        }
+        const { sendPasswordResetEmail } = await import("@/lib/email");
+        await sendPasswordResetEmail(resetEntry.email, resetEntry.name, "/reset-password?token=" + resetEntry.token);
+        return NextResponse.json({ ok: true, message: "Ссылка для сброса пароля отправлена на email" });
+      }
+      case "resetPassword": {
+        if (!params.token || !params.password) {
+          return NextResponse.json({ ok: false, error: "Токен и новый пароль обязательны" });
+        }
+        if ((params.password as string).length < 6) {
+          return NextResponse.json({ ok: false, error: "Пароль должен быть не менее 6 символов" });
+        }
+        const rpUser = await dbResetPassword(params.token as string, params.password as string);
+        if (!rpUser) {
+          return NextResponse.json({ ok: false, error: "Ссылка недействительна или истекла. Запросите новую." });
+        }
+        return NextResponse.json({ ok: true, message: "Пароль успешно изменён" });
+      }
+
       case "register": {
         const existing = await dbGetProfile(params.email);
         if (existing) return NextResponse.json({ ok: false, error: "Email уже зарегистрирован" });
