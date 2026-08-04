@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
 
     const tokenData = await tokenRes.json();
     if (tokenData.error) {
-      console.error("VK token exchange error:", tokenData);
+      console.error("VK token exchange error:", tokenData.error, tokenData.error_description || "");
       return NextResponse.redirect(new URL("/?error=vk_token", req.url));
     }
 
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
     const userData = await userRes.json();
 
     if (userData.error) {
-      console.error("VK user info error:", userData);
+      console.error("VK user info error:", userData.error, userData.error_description || "");
       return NextResponse.redirect(new URL("/?error=vk_userinfo", req.url));
     }
 
