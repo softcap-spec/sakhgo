@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/pg";
 import { sendTgNotification, isTgConfigured } from "@/lib/notify";
+import { getSession, createSession, clearSession } from "@/lib/session";
+import { sanitizeUser } from "@/lib/db";
 import {
   dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
   dbChangePassword,
@@ -28,10 +30,60 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// Actions that require an authenticated admin session.
+const ADMIN_ONLY = new Set([
+  "getAllProfiles", "getAllListings", "adminUpdateListing", "approveListing",
+  "moderateReview", "getPendingReviews", "updatePromoPricing", "updatePromotionStatus",
+  "getAllPromotions", "getPromoStats", "expirePromotions", "createPromotion",
+  "getAdminNotifications", "getUnreadCount", "markNotificationRead", "markAllNotificationsRead",
+  "addBanner", "updateBanner", "removeBanner",
+  "getPendingEdits", "approveEdit", "rejectEdit", "setHelpContent",
+  "createMessagesTable", // one-off migration action — TODO: move to a real migration script
+  "testTgNotification",
+]);
+
+// Actions that operate on "my own" resource: the given param must match the
+// logged-in user's id (or the caller must be an admin).
+const OWNER_PARAM: Record<string, string> = {
+  deleteProfile: "userId",
+  changePassword: "id",
+  updateProfile: "id",
+  getMyListings: "hostId",
+  addListing: "hostId",
+  updateListing: "hostId",
+  removeListing: "hostId",
+  getHostListingById: "hostId",
+  getMyBookings: "guestId",
+  getHostStats: "hostId",
+  getHostListingStats: "hostId",
+  getMyPromotions: "hostId",
+  getEmailNotificationPref: "userId",
+  setEmailNotificationPref: "userId",
+  getTgNotificationPref: "userId",
+  setTgNotificationPref: "userId",
+  sendMessage: "senderId",
+  getMessages: "userId",
+  getChatList: "userId",
+  markMessagesRead: "userId",
+};
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { action, ...params } = body;
+    const session = await getSession();
+
+    if (ADMIN_ONLY.has(action) && session?.role !== "admin") {
+      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+
+    if (action in OWNER_PARAM) {
+      const requestedId = params[OWNER_PARAM[action]];
+      const allowed = session && (session.userId === requestedId || session.role === "admin");
+      if (!allowed) {
+        return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+      }
+    }
 
     switch (action) {
 
@@ -39,7 +91,8 @@ export async function POST(req: NextRequest) {
       case "login": {
         const user = await dbLogin(params.email, params.password || "");
         if (!user) return NextResponse.json({ ok: false, error: "Неверный email или пароль" });
-        return NextResponse.json({ ok: true, data: user });
+        await createSession(user.id, user.role || "user");
+        return NextResponse.json({ ok: true, data: sanitizeUser(user) });
       }
       case "register": {
         const existing = await dbGetProfile(params.email);
@@ -52,11 +105,16 @@ export async function POST(req: NextRequest) {
         const user = await dbCreateProfile({
           name: params.name, email: params.email, phone: params.phone || "", password: params.password
         });
-        return NextResponse.json({ ok: true, data: user });
+        await createSession(user.id, user.role || "user");
+        return NextResponse.json({ ok: true, data: sanitizeUser(user) });
+      }
+      case "logout": {
+        await clearSession();
+        return NextResponse.json({ ok: true });
       }
       case "updateProfile": {
         const user = await dbUpdateProfile(params.id, params.data);
-        return NextResponse.json({ ok: true, data: user });
+        return NextResponse.json({ ok: true, data: sanitizeUser(user) });
       }
 
       case "getEmailNotificationPref": {

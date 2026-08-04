@@ -3,6 +3,13 @@ import bcrypt from "bcryptjs";
 import { sendAdminEmailNotification } from "./email";
 import { sendTgNotification } from "./notify";
 
+/** Strip sensitive fields before a user row is ever sent to the client. */
+export function sanitizeUser<T extends Record<string, any> | null | undefined>(user: T): Omit<T, "password_hash" | "verification_code"> | null {
+  if (!user) return null;
+  const { password_hash, verification_code, ...safe } = user;
+  return safe;
+}
+
 // ── Profiles ──
 
 export async function dbGetProfile(email: string) {
@@ -94,7 +101,7 @@ export async function dbUpdateProfile(id: string, data: Record<string, unknown>)
 /** Admin: get all profiles */
 export async function dbGetAllProfiles() {
   const { rows } = await pool.query("SELECT * FROM profiles ORDER BY created_at DESC");
-  return rows;
+  return rows.map(sanitizeUser);
 }
 
 /** Admin: get all listings (including inactive/unverified) */
@@ -593,8 +600,13 @@ export async function dbAddBanner(data: {
   return rows[0];
 }
 
+const BANNER_VALID_COLUMNS = new Set([
+  "title", "image_url", "link_url", "html_content", "slot",
+  "active", "start_date", "end_date",
+]);
+
 export async function dbUpdateBanner(id: string, patch: Record<string, unknown>) {
-  const keys = Object.keys(patch).filter(k => patch[k] !== undefined);
+  const keys = Object.keys(patch).filter(k => patch[k] !== undefined && BANNER_VALID_COLUMNS.has(k));
   if (keys.length === 0) return;
   const setClauses = keys.map((k, i) => `${k} = $${i + 2}`);
   const values = keys.map((k) => patch[k]);

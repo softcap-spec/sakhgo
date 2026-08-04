@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifySessionToken } from "@/lib/session";
 
-// Simple middleware: block /admin for non-admins
-// Relies on a cookie set client-side after successful admin login.
-// Actual role check is done client-side in the admin page.
-export function middleware(req: NextRequest) {
-  // This is a lightweight check; auth is enforced client-side
+// Blocks /admin for anyone without a valid admin session cookie.
+// The cookie is signed server-side (see src/lib/session.ts) so it can't be
+// forged by the client — this replaces the old client-only role check.
+export async function middleware(req: NextRequest) {
+  const session = await verifySessionToken(req.cookies.get("session")?.value);
+  if (session?.role !== "admin") {
+    return NextResponse.redirect(new URL("/", req.url));
+  }
   return NextResponse.next();
 }
 
