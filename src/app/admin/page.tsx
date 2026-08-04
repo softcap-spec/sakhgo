@@ -1325,6 +1325,41 @@ interface BuildEntry {
 
 const BUILD_HISTORY: BuildEntry[] = [
   {
+    version: "1.5.0",
+    date: "2026-08-05",
+    description: "Voskstanovlenie parolya + VK ID autentifikatsiya",
+    changes: [
+      "auth-modal.tsx: rezhim 'forgot', knopka 'Zabyli parol?'",
+      "reset-password/page.tsx: stranitsa sbrosa s tokenom iz URL",
+      "db.ts: dbCreatePasswordResetToken, dbResetPassword (1 chas)",
+      "email.ts: sendPasswordResetEmail (HTML s 🔐)",
+      "route.ts: forgotPassword, resetPassword actions",
+      "migrations: 008_password_reset (password_reset_token + expires)",
+      "migrations: 009_vk_login (vk_id column)",
+      "db.ts: dbFindProfileByVkId, dbLinkVkId, dbCreateProfileFromVk",
+      "vk/login/route.ts: PKCE (code_verifier + code_challenge S256)",
+      "vk/callback/route.ts: session creation via createSession + DB profile",
+      "route.ts: getMe action (current user from session)",
+      "api.ts: apiGetMe, store.ts: fetchMe",
+      "page.tsx: vk_auth=ok handler -> fetchMe + close modal",
+    ],
+    hash: "35beb9d"
+  },
+  {
+    version: "1.4.2",
+    date: "2026-08-05",
+    description: "Ispravleniye: dual-format params extraction + QA fixes",
+    changes: [
+      "route.ts: params extraction supports flat + nested JSON (admin login fix)",
+      "route.ts: verifyListingOwner/verifyBookingParticipant called (were missing)",
+      "route.ts: 401 vs 403 distinction for OWNER_PARAM without session",
+      "auth-modal.tsx: mode type includes 'forgot'",
+      "Build: QA script confirms all pages 200, protections active",
+    ],
+    hash: "2194f75"
+  },
+
+  {
     version: "1.4.1",
     date: "2026-08-05",
     description: "Audit bezopasnosti: zakrytie uyazvimostey",
