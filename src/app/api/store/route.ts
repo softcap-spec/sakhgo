@@ -92,7 +92,7 @@ async function verifyBookingParticipant(session: { userId: string; role: string 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { action, ...params } = body;
+    const { action, params = {} } = body;
     const session = await getSession();
 
     if (ADMIN_ONLY.has(action) && session?.role !== "admin") {
@@ -105,7 +105,22 @@ export async function POST(req: NextRequest) {
       if (!allowed) {
         return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
       }
-    }
+  }
+
+  // gated actions: listing owner
+  if (action === "addListingImage" || action === "removeListingImage") {
+    const ok = await verifyListingOwner(session, params.listingId);
+    if (!ok) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+  }
+  // gated actions: booking participant
+  if (action === "updateBookingStatus") {
+    const ok = await verifyBookingParticipant(session, params.id);
+    if (!ok) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+  }
+  // session-required
+  if (action === "incrementPromoClick" && !session) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
 
     switch (action) {
 
