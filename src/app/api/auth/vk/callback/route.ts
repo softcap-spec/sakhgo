@@ -1,47 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createSession } from "@/lib/session";
+import { dbFindProfileByVkId, dbLinkVkId, dbCreateProfileFromVk, dbGetProfile } from "@/lib/db";
 
 const VK_APP_ID = process.env.VK_APP_ID || "YOUR_VK_APP_ID";
-const VK_CLIENT_SECRET = process.env.VK_CLIENT_SECRET || "";
-const VK_SERVICE_TOKEN = process.env.VK_SERVICE_TOKEN || "";
+const VK_CLIENT_SECRET = process.env.VK_CLIENT_SECRET || "YOUR_CLIENT_SECRET";
 const REDIRECT_URI = "https://sakhgo.ru/api/auth/vk/callback";
 
-const VK_API = {
-  token: "https://id.vk.com/oauth2/auth",
-  exchange: "https://id.vk.com/oauth2/token",
-  userInfo: "https://id.vk.com/oauth2/user_info",
-};
+const VK_TOKEN_URL = "https://id.vk.com/oauth2/auth";
+const VK_USER_INFO = "https://id.vk.com/oauth2/user_info";
 
-/**
- * GET /api/auth/vk/callback
- * VK ID возвращает code + device_id. Обмениваем на access_token,
- * затем получаем данные пользователя: user_id, first_name, last_name, email, phone.
- *
- * После успешной авторизации редиректим на главную с токеном VK.
- */
+/** GET /api/auth/vk/callback — exchange code, get user, create session */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
   const deviceId = url.searchParams.get("device_id");
   const state = url.searchParams.get("state");
-  const storedState = req.cookies.get("vk_auth_state")?.value;
+
+  // Read PKCE data from cookie
+  const pkceCookie = req.cookies.get("vk_pkce")?.value;
+  if (!pkceCookie) {
+    return NextResponse.redirect(new URL("/?error=vk_expired", req.url));
+  }
+
+  let pkceData: { verifier: string; state: string };
+  try {
+    pkceData = JSON.parse(pkceCookie);
+  } catch {
+    return NextResponse.redirect(new URL("/?error=vk_invalid", req.url));
+  }
 
   // CSRF check
-  if (!state || state !== storedState) {
-    return NextResponse.redirect(new URL("/?error=invalid_state", req.url));
+  if (!state || state !== pkceData.state) {
+    return NextResponse.redirect(new URL("/?error=vk_csrf", req.url));
   }
 
   if (!code || !deviceId) {
-    return NextResponse.redirect(new URL("/?error=no_auth_code", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_no_code", req.url));
   }
 
   try {
-    // 1. Exchange code → access_token
-    const tokenRes = await fetch(VK_API.exchange, {
+    // 1. Exchange code + PKCE verifier -> access_token
+    const tokenRes = await fetch(VK_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "authorization_code",
-        code_verifier: "auto_generated", // in prod: store and use PKCE verifier
+        code_verifier: pkceData.verifier,
         code,
         client_id: VK_APP_ID,
         client_secret: VK_CLIENT_SECRET,
@@ -58,35 +62,56 @@ export async function GET(req: NextRequest) {
 
     const accessToken = tokenData.access_token;
 
-    // 2. Get user info
-    const userRes = await fetch(`${VK_API.userInfo}?client_id=${VK_APP_ID}&access_token=${accessToken}`);
+    // 2. Get user info from VK
+    const userRes = await fetch(
+      VK_USER_INFO + "?client_id=" + VK_APP_ID + "&access_token=" + accessToken
+    );
     const userData = await userRes.json();
 
     if (userData.error) {
       console.error("VK user info error:", userData);
-      return NextResponse.redirect(new URL("/?error=vk_user_info", req.url));
+      return NextResponse.redirect(new URL("/?error=vk_userinfo", req.url));
     }
 
-    // 3. Build user profile from VK data
-    const vkUser = userData.user;
-    const profile = {
-      vkId: String(vkUser.user_id),
-      name: `${vkUser.first_name ?? ""} ${vkUser.last_name ?? ""}`.trim(),
-      email: vkUser.email ?? `${vkUser.user_id}@vk.com`,
-      phone: vkUser.phone ?? "",
-      phoneVerified: !!vkUser.phone,
-    };
+    const vu = userData.user;
+    const vkId = String(vu.user_id);
+    const name = (vu.first_name + " " + (vu.last_name || "")).trim();
+    const email = vu.email || vkId + "@vk.com";
+    const phone = vu.phone || "";
 
-    // 4. Set cookie with VK session data (in production: create proper JWT/Supabase session)
+    // 3. Find existing profile or create new one
+    let profile = await dbFindProfileByVkId(vkId);
+
+    if (!profile) {
+      // Try to match by email (possibly registered with email/password before)
+      const emailProfile = await dbGetProfile(email);
+      if (emailProfile) {
+        profile = emailProfile;
+        await dbLinkVkId(profile.id, vkId);
+      } else {
+        // Create brand new profile from VK data
+        profile = await dbCreateProfileFromVk({
+          vkId, name, email, phone,
+          phoneVerified: !!vu.phone,
+        });
+      }
+    }
+
+    if (!profile) {
+      console.error("VK: failed to create/find profile");
+      return NextResponse.redirect(new URL("/?error=vk_profile", req.url));
+    }
+
+    // 4. Create proper session
+    await createSession(profile.id, profile.role || "user");
+
+    // 5. Clean up PKCE cookie, redirect home
     const res = NextResponse.redirect(new URL("/?vk_auth=ok", req.url));
-    res.cookies.set("vk_session", JSON.stringify(profile), {
-      httpOnly: true, secure: true, sameSite: "lax", maxAge: 86400 * 7, path: "/",
-    });
-    res.cookies.delete("vk_auth_state");
-
+    res.cookies.delete("vk_pkce");
     return res;
+
   } catch (err) {
     console.error("VK callback error:", err);
-    return NextResponse.redirect(new URL("/?error=vk_callback_failed", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_failed", req.url));
   }
 }

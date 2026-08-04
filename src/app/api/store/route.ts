@@ -127,6 +127,16 @@ export async function POST(req: NextRequest) {
     switch (action) {
 
       // ── Auth ──
+      // ── Session check (current user) ──
+      case "getMe": {
+        if (!session) return NextResponse.json({ ok: false, error: "Not authenticated" }, { status: 401 });
+        const { rows: [me] } = await pool.query(
+          "SELECT id, name, email, phone, phone_verified, role, avatar_url, vk_id FROM profiles WHERE id = $1",
+          [session.userId]
+        );
+        return NextResponse.json({ ok: true, data: me || null });
+      }
+
       case "login": {
         const user = await dbLogin(params.email, params.password || "");
         if (!user) return NextResponse.json({ ok: false, error: "Неверный email или пароль" });

@@ -16,6 +16,18 @@ export default function HomePage() {
 
   // Auto-expire promotions on page load
   useEffect(() => {
+    // VK ID callback: refresh user state after redirect
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("vk_auth")) {
+      import("@/lib/store").then(({ useStore }) => {
+        const store = useStore.getState();
+        store.fetchMe().then(() => store.setAuthOpen(false));
+        // Clean URL
+        const url = new URL(window.location.href);
+        url.searchParams.delete("vk_auth");
+        window.history.replaceState({}, "", url.toString());
+      });
+    }
     import("@/lib/api").then(({ apiExpirePromotions }) => {
       apiExpirePromotions().catch(() => {});
     });

@@ -15,6 +15,16 @@ async function call(action: string, params?: Record<string, unknown>) {
 }
 
 // ── Auth ──
+/** Get current user from session cookie */
+export async function apiGetMe() {
+  try {
+    const r = await call("getMe", {});
+    return r;
+  } catch {
+    return null;
+  }
+}
+
 export const apiForgotPassword = (email: string) =>
   call("forgotPassword", { email });
 export const apiResetPassword = (token: string, password: string) =>

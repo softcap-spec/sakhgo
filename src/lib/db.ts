@@ -11,6 +11,34 @@ export function sanitizeUser<T extends Record<string, any> | null | undefined>(u
   return safe;
 }
 
+// ── VK ID ──
+
+export async function dbFindProfileByVkId(vkId: string) {
+  const { rows: [r] } = await pool.query(
+    "SELECT * FROM profiles WHERE vk_id = $1", [vkId]
+  );
+  return r || null;
+}
+
+export async function dbLinkVkId(userId: string, vkId: string) {
+  await pool.query(
+    "UPDATE profiles SET vk_id = $1 WHERE id = $2", [vkId, userId]
+  );
+}
+
+export async function dbCreateProfileFromVk(user: {
+  vkId: string; name: string; email: string; phone?: string; phoneVerified?: boolean;
+}) {
+  const { rows: [r] } = await pool.query(
+    `INSERT INTO profiles (name, email, phone, phone_verified, vk_id)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (email) DO UPDATE SET vk_id = $5
+     RETURNING *`,
+    [user.name, user.email, user.phone || "", user.phoneVerified || false, user.vkId]
+  );
+  return r;
+}
+
 // ── Profiles ──
 
 export async function dbGetProfile(email: string) {

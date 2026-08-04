@@ -172,7 +172,10 @@ interface AppState {
   moderationNoteCount: number;
 
   authOpen: boolean;
-  authMode: "login" | "register";
+  authMode: "login" | "register" | "forgot";
+
+  // ── VK ──
+  fetchMe: () => Promise<boolean>;
 
   // ── Auth ──
   forgotPassword: (email: string) => Promise<boolean>;
@@ -332,7 +335,32 @@ export const useStore = create<AppState>()(
           } catch { return false; }
         },
 
-        logout: () => set({ user: null, favorites: [], bookings: [], myListings: [], pendingEdits: [] }),
+              fetchMe: async () => {
+          try {
+            const { apiGetMe } = await import("@/lib/api");
+            const user = await apiGetMe();
+            if (user) {
+              set({
+                user: {
+                  id: user.id,
+                  name: user.name,
+                  email: user.email,
+                  phone: user.phone || "",
+                  phoneVerified: user.phone_verified ?? false,
+                  role: user.role,
+                  avatar: user.avatar_url || user.avatar || undefined,
+                  twoFactorEnabled: false,
+                },
+              });
+              return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        },
+
+logout: () => set({ user: null, favorites: [], bookings: [], myListings: [], pendingEdits: [] }),
 
         setUser: (u) => set({ user: u }),
 
