@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import {
   Flame, TrendingUp, Palette, Check, Zap, Star, Loader2,
 } from "lucide-react";
-import { apiInitPromoPayment, apiCreatePayment } from "@/lib/api";
+import { apiInitPromoPayment, apiCreatePayment, apiGetPromoPricing } from "@/lib/api";
 import { useStore } from "@/lib/store";
 
 type PromoType = "top" | "urgent" | "highlight";
@@ -28,31 +28,28 @@ const DURATIONS = [
 
 const PROMO_OFFERS: {
   type: PromoType; label: string; desc: string;
-  icon: typeof Flame; basePrice: number; color: string;
+  icon: typeof Flame; color: string;
 }[] = [
   {
-    type:      "top",
-    label:     "В ТОП",
-    desc:      "Объявление закрепляется первым в каталоге и на главной. Выбирайте срок — чем дольше, тем выгоднее.",
-    icon:      TrendingUp,
-    basePrice: 2990,
-    color:     "bg-gradient-to-r from-amber-500 to-orange-500",
+    type:  "top",
+    label: "В ТОП",
+    desc:  "Объявление закрепляется первым в каталоге и на главной. Выбирайте срок — чем дольше, тем выгоднее.",
+    icon:  TrendingUp,
+    color: "bg-gradient-to-r from-amber-500 to-orange-500",
   },
   {
-    type:      "urgent",
-    label:     "Срочно",
-    desc:      "Объявление получает метку срочности и поднимается в поиске. Для горящих дат и последних мест.",
-    icon:      Flame,
-    basePrice: 990,
-    color:     "bg-gradient-to-r from-red-500 to-rose-500",
+    type:  "urgent",
+    label: "Срочно",
+    desc:  "Объявление получает метку срочности и поднимается в поиске. Для горящих дат и последних мест.",
+    icon:  Flame,
+    color: "bg-gradient-to-r from-red-500 to-rose-500",
   },
   {
-    type:      "highlight",
-    label:     "Выделение цветом",
-    desc:      "Объявление выделяется яркой рамкой и привлекает взгляд в результатах поиска и каталоге.",
-    icon:      Palette,
-    basePrice: 1490,
-    color:     "bg-gradient-to-r from-violet-500 to-purple-500",
+    type:  "highlight",
+    label: "Выделение цветом",
+    desc:  "Объявление выделяется яркой рамкой и привлекает взгляд в результатах поиска и каталоге.",
+    icon:  Palette,
+    color: "bg-gradient-to-r from-violet-500 to-purple-500",
   },
 ];
 
@@ -71,21 +68,39 @@ export function PromoteModal({
 
   const [selected, setSelected] = useState<PromoType | null>(null);
   const [duration, setDuration]  = useState("7");
+  const [pricing, setPricing]    = useState<Record<string, any> | null>(null);
+  const [pricingLoaded, setPricingLoaded] = useState(false);
+
+  useEffect(() => {
+    apiGetPromoPricing().then((rows: any[]) => {
+      if (rows?.length) {
+        const map: Record<string, any> = {};
+        for (const r of rows) {
+          if (r.enabled) map[r.promo_type] = r;
+        }
+        setPricing(map);
+      }
+      setPricingLoaded(true);
+    }).catch(() => setPricingLoaded(true));
+  }, []);
+
+  const getTierPrice = (type: string, days: string) => {
+    const p = pricing?.[type];
+    if (!p) return 0;
+    const key = "base_price_" + days + "d";
+    return (p[key] as number) ?? 0;
+  };
+
+  const getMinPrice = (type: string) => getTierPrice(type, "7") || 0;
   const [loading, setLoading]    = useState(false);
   const [error, setError]        = useState<string | null>(null);
-
-  const calcPrice = (base: number, dur: string) => {
-    const d = DURATIONS.find((x) => x.value === dur);
-    return Math.round(base * (d?.multiplier ?? 1));
-  };
 
   const handlePay = async () => {
     if (!selected || !user) return;
     setError(null);
     setLoading(true);
 
-    const offer = PROMO_OFFERS.find((o) => o.type === selected)!;
-    const price = calcPrice(offer.basePrice, duration);
+    const price = getTierPrice(selected, duration) || 0;
 
     try {
       // Шаг 1: создаём / получаем запись promotions
@@ -121,8 +136,7 @@ export function PromoteModal({
     onOpenChange(false);
   };
 
-  const selectedOffer = PROMO_OFFERS.find((o) => o.type === selected);
-  const finalPrice    = selectedOffer ? calcPrice(selectedOffer.basePrice, duration) : 0;
+  const finalPrice    = selected ? getTierPrice(selected, duration) : 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -174,7 +188,7 @@ export function PromoteModal({
                     <p className="text-xs text-muted-foreground mt-1">{offer.desc}</p>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="font-display text-lg">{offer.basePrice.toLocaleString("ru-RU")} ₽</div>
+                    <div className="font-display text-lg">{pricingLoaded ? getMinPrice(offer.type).toLocaleString("ru-RU") : "..."} ₽</div>
                     <span className="text-xs text-muted-foreground">за 7 дн.</span>
                   </div>
                 </div>
@@ -192,9 +206,10 @@ export function PromoteModal({
                   </SelectTrigger>
                   <SelectContent>
                     {DURATIONS.map((d) => {
-                      const p = selectedOffer ? calcPrice(selectedOffer.basePrice, d.value) : 0;
-                      const savings = d.value !== "7"
-                        ? Math.round(selectedOffer!.basePrice * parseInt(d.value) - p)
+                      const p = selected ? getTierPrice(selected, d.value) : 0;
+                      const base7 = selected ? getTierPrice(selected, "7") : 0;
+                      const savings = d.value !== "7" && base7 > 0
+                        ? Math.round(base7 * parseInt(d.value) / 7 - p)
                         : 0;
                       return (
                         <SelectItem key={d.value} value={d.value}>
@@ -218,7 +233,7 @@ export function PromoteModal({
                 <div className="flex items-center gap-1.5 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
                   <Star className="w-3.5 h-3.5 shrink-0" />
                   <span>
-                    Экономия {Math.round(selectedOffer!.basePrice * parseInt(duration) - finalPrice).toLocaleString("ru-RU")} ₽
+                    Экономия {Math.round(getTierPrice(selected!, "7") * parseInt(duration) / 7 - finalPrice).toLocaleString("ru-RU")} ₽
                     по сравнению с оплатой понедельно
                   </span>
                 </div>
