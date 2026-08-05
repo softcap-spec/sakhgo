@@ -1516,6 +1516,20 @@ interface BuildEntry {
 
 const BUILD_HISTORY: BuildEntry[] = [
   {
+    version: "1.6.0",
+    date: "2026-08-05",
+    description: "Монетизация: ЮKassa + реальные платежи за продвижение",
+    changes: [
+      "Полная цепочка монетизации: заявка → платёж ЮKassa → активация",
+      "lib/yookassa.ts: initYooKassaPayment + проверка вебхуков",
+      "Новая страница /dashboard/payment/result — статус оплаты",
+      "initYooKassaPayment в OWNER_PARAM (только хост своего объявления)",
+      "Тестовый simulatePayment (админ) для отладки без реальных денег",
+      "PromoteModal: передача durationDays + price для создания заявки",
+      "dbUpdatePromotionStatus: авто-установка/снятие promo на listing",
+    ],
+  }, 
+  {
     version: "1.5.0",
     date: "2026-08-05",
     description: "Восстановление пароля + VK ID аутентификация",
