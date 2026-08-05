@@ -219,6 +219,25 @@ export async function dbGetAllListings() {
   return rows;
 }
 
+
+export async function dbApplyListingPromo(
+  hostId: string, listingId: string,
+  promoType: "top" | "urgent" | "highlight", durationDays: number = 7
+) {
+  const { rows } = await pool.query(
+    "SELECT id, title FROM listings WHERE id = $1 AND host_id = $2",
+    [listingId, hostId]
+  );
+  if (!rows[0]) return { ok: false as const, error: "Listing not found" };
+
+  await pool.query(
+    `UPDATE listings SET promo = $2, promo_expires_at = now() + ($3 || ' days')::interval, updated_at = now()
+     WHERE id = $1`,
+    [listingId, promoType, durationDays]
+  );
+  return { ok: true as const };
+}
+
 /** Admin: update any listing directly */
 const ADMIN_LISTING_EDITABLE_COLUMNS = new Set([
   "title", "description", "price", "location", "amenities", "images",
@@ -667,7 +686,7 @@ export async function dbAddBooking(data: {
 }) {
   // Fetch listing to verify price and check date overlap
   const { rows: [listing] } = await pool.query(
-    "SELECT price, host_id FROM listings WHERE id = $1 AND active = true",
+    "SELECT price, type, host_id FROM listings WHERE id = $1 AND active = true",
     [data.listingId]
   );
   if (!listing) throw new Error("Listing not found or inactive");
@@ -676,7 +695,7 @@ export async function dbAddBooking(data: {
   const checkIn = new Date(data.checkIn);
   const checkOut = new Date(data.checkOut);
   const nights = Math.max(1, Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
-  const totalPrice = listing.price * nights;
+  const totalPrice = listing.type === "rental_gear" ? listing.price : listing.price * nights;
   
   // Check for overlapping bookings
   const { rows: overlaps } = await pool.query(

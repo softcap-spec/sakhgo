@@ -23,7 +23,7 @@ import {
   dbSendMessage, dbGetMessages, dbGetChatList, dbMarkMessagesRead,
   dbGetEmailNotificationPref, dbSetEmailNotificationPref,
   dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
-  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbGetPromoStats,
+  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats,
   dbExpirePromotions,
   dbGetMyPromotions, dbIncrementPromoStats,
   dbCreateEmailVerificationCode, dbVerifyEmail,
@@ -288,6 +288,12 @@ export async function POST(req: NextRequest) {
         }
         return NextResponse.json({ ok: true, data: listing });
       }
+      case "applyListingPromo": {
+        const promoResult = await dbApplyListingPromo(params.hostId, params.id, params.promo, params.duration);
+        if (promoResult && !promoResult.ok) return NextResponse.json(promoResult, { status: 404 });
+        return NextResponse.json({ ok: true });
+      }
+
       case "updateListing": {
         await dbUpdateListing(params.id, params.hostId, params.patch);
         // Re-sync images

@@ -499,11 +499,17 @@ logout: () => set({ user: null, favorites: [], bookings: [], myListings: [], pen
         })),
 
         updateListingPromo: (id, promo) => {
-          // Persist to DB
           const user = get().user;
-          import("@/lib/api").then(({ apiUpdateListing }) => {
-            apiUpdateListing(id, user!.id, { promo: promo || null }).catch(() => {});
-          });
+          if (promo) {
+            import("@/lib/api").then(({ apiApplyListingPromo }) => {
+              apiApplyListingPromo(user!.id, id, promo).catch(() => {});
+            });
+          } else {
+            // Removing promo — still needs admin (host can't unset their own promo via self-edit whitelist)
+            import("@/lib/api").then(({ apiUpdateListing }) => {
+              apiUpdateListing(id, user!.id, { promo: null }).catch(() => {});
+            });
+          }
           set((s) => ({
             myListings: s.myListings.map((l) => l.id === id ? { ...l, promo } : l),
           }));

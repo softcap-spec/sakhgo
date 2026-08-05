@@ -59,6 +59,9 @@ export const apiGetHostListingById = (id: string, hostId: string) => call("getHo
 // ── Host listings ──
 export const apiGetMyListings = (hostId: string) => call("getMyListings", { hostId });
 export const apiAddListing = (params: Record<string, unknown>) => call("addListing", params);
+export const apiApplyListingPromo = (hostId: string, id: string, promo: string, duration: number = 7) =>
+  call("applyListingPromo", { hostId, id, promo, duration });
+
 export const apiUpdateListing = (id: string, hostId: string, patch: Record<string, unknown>, images?: string[]) =>
   call("updateListing", { id, hostId, patch, images });
 export const apiApproveListing = (id: string) => call("approveListing", { id });
