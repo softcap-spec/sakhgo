@@ -43,6 +43,8 @@ const ADMIN_ONLY = new Set([
   "getAllProfiles",
   "createMessagesTable", // one-off migration action — TODO: move to a real migration script
   "testTgNotification",
+  "searchProfiles",
+  "getAdminStats",
 ]);
 
 // Actions that operate on "my own" resource: the given param must match the
@@ -53,6 +55,8 @@ const OWNER_PARAM: Record<string, string> = {
   updateProfile: "id",
   getMyListings: "hostId",
   addListing: "hostId",
+  applyListingPromo: "hostId",
+  addPendingEdit: "hostId",
   addBooking: "guestId",
   addReview: "guestId",
   updateListing: "hostId",

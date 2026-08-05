@@ -230,10 +230,11 @@ export async function dbApplyListingPromo(
   );
   if (!rows[0]) return { ok: false as const, error: "Listing not found" };
 
+  const safeDays = Math.min(durationDays, 30);
   await pool.query(
     `UPDATE listings SET promo = $2, promo_expires_at = now() + ($3 || ' days')::interval, updated_at = now()
      WHERE id = $1`,
-    [listingId, promoType, durationDays]
+    [listingId, promoType, safeDays]
   );
   return { ok: true as const };
 }
