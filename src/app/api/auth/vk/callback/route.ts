@@ -4,14 +4,15 @@ import { dbFindProfileByVkId, dbLinkVkId, dbCreateProfileFromVk, dbGetProfile } 
 
 const VK_APP_ID = process.env.VK_APP_ID || "YOUR_VK_APP_ID";
 const VK_CLIENT_SECRET = process.env.VK_CLIENT_SECRET || "YOUR_CLIENT_SECRET";
-const REDIRECT_URI = "https://sakhgo.ru/api/auth/vk/callback";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://sakhgo.ru";
+const REDIRECT_URI = SITE_URL + "/api/auth/vk/callback";
 
 const VK_TOKEN_URL = "https://id.vk.com/oauth2/auth";
 const VK_USER_INFO = "https://id.vk.com/oauth2/user_info";
 
 /** GET /api/auth/vk/callback — exchange code, get user, create session */
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
+  const url = new URL(req.url); // for parsing query params only
   const code = url.searchParams.get("code");
   const deviceId = url.searchParams.get("device_id");
   const state = url.searchParams.get("state");
@@ -19,23 +20,23 @@ export async function GET(req: NextRequest) {
   // Read PKCE data from cookie
   const pkceCookie = req.cookies.get("vk_pkce")?.value;
   if (!pkceCookie) {
-    return NextResponse.redirect(new URL("/?error=vk_expired", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_expired", SITE_URL));
   }
 
   let pkceData: { verifier: string; state: string };
   try {
     pkceData = JSON.parse(pkceCookie);
   } catch {
-    return NextResponse.redirect(new URL("/?error=vk_invalid", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_invalid", SITE_URL));
   }
 
   // CSRF check
   if (!state || state !== pkceData.state) {
-    return NextResponse.redirect(new URL("/?error=vk_csrf", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_csrf", SITE_URL));
   }
 
   if (!code || !deviceId) {
-    return NextResponse.redirect(new URL("/?error=vk_no_code", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_no_code", SITE_URL));
   }
 
   try {
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
     const tokenData = await tokenRes.json();
     if (tokenData.error) {
       console.error("VK token exchange error:", tokenData.error, tokenData.error_description || "");
-      return NextResponse.redirect(new URL("/?error=vk_token", req.url));
+      return NextResponse.redirect(new URL("/?error=vk_token", SITE_URL));
     }
 
     const accessToken = tokenData.access_token;
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
 
     if (userData.error) {
       console.error("VK user info error:", userData.error, userData.error_description || "");
-      return NextResponse.redirect(new URL("/?error=vk_userinfo", req.url));
+      return NextResponse.redirect(new URL("/?error=vk_userinfo", SITE_URL));
     }
 
     const vu = userData.user;
@@ -99,19 +100,19 @@ export async function GET(req: NextRequest) {
 
     if (!profile) {
       console.error("VK: failed to create/find profile");
-      return NextResponse.redirect(new URL("/?error=vk_profile", req.url));
+      return NextResponse.redirect(new URL("/?error=vk_profile", SITE_URL));
     }
 
     // 4. Create proper session
     await createSession(profile.id, profile.role || "user");
 
     // 5. Clean up PKCE cookie, redirect home
-    const res = NextResponse.redirect(new URL("/?vk_auth=ok", req.url));
+    const res = NextResponse.redirect(new URL("/?vk_auth=ok", SITE_URL));
     res.cookies.delete("vk_pkce");
     return res;
 
   } catch (err) {
     console.error("VK callback error:", err);
-    return NextResponse.redirect(new URL("/?error=vk_failed", req.url));
+    return NextResponse.redirect(new URL("/?error=vk_failed", SITE_URL));
   }
 }
