@@ -1204,3 +1204,57 @@ export async function dbGetMyPromotions(hostId: string) {
   );
   return rows;
 }
+
+
+export interface AdminStats {
+  totalUsers: number;
+  totalListings: number;
+  activeListings: number;
+  pendingEdits: number;
+  totalBookings: number;
+  newUsers7d: number;
+  newListings7d: number;
+  newBookings7d: number;
+  promoRevenue: number;
+  usersByRole: { role: string; count: number }[];
+}
+
+export async function dbGetAdminStats(): Promise<AdminStats> {
+  const [
+    { rows: [totals] },
+    { rows: [weekStats] },
+    { rows: roleRows },
+  ] = await Promise.all([
+    pool.query(
+      `SELECT
+        (SELECT COUNT(*) FROM profiles)::int AS "totalUsers",
+        (SELECT COUNT(*) FROM listings)::int AS "totalListings",
+        (SELECT COUNT(*) FROM listings WHERE active = true)::int AS "activeListings",
+        (SELECT COUNT(*) FROM pending_edits WHERE status = 'pending')::int AS "pendingEdits",
+        (SELECT COUNT(*) FROM bookings)::int AS "totalBookings",
+        COALESCE((SELECT SUM(price) FROM promotions WHERE status = 'paid'), 0)::int AS "promoRevenue"`
+    ),
+    pool.query(
+      `SELECT
+        (SELECT COUNT(*) FROM profiles WHERE created_at >= NOW() - INTERVAL '7 days')::int AS "newUsers7d",
+        (SELECT COUNT(*) FROM listings WHERE created_at >= NOW() - INTERVAL '7 days')::int AS "newListings7d",
+        (SELECT COUNT(*) FROM bookings WHERE created_at >= NOW() - INTERVAL '7 days')::int AS "newBookings7d"`
+    ),
+    pool.query(
+      `SELECT role, COUNT(*)::int AS count FROM profiles GROUP BY role ORDER BY count DESC`
+    ),
+  ]);
+
+  return {
+    totalUsers: totals?.totalUsers ?? 0,
+    totalListings: totals?.totalListings ?? 0,
+    activeListings: totals?.activeListings ?? 0,
+    pendingEdits: totals?.pendingEdits ?? 0,
+    totalBookings: totals?.totalBookings ?? 0,
+    promoRevenue: totals?.promoRevenue ?? 0,
+    newUsers7d: weekStats?.newUsers7d ?? 0,
+    newListings7d: weekStats?.newListings7d ?? 0,
+    newBookings7d: weekStats?.newBookings7d ?? 0,
+    usersByRole: roleRows || [],
+  };
+}

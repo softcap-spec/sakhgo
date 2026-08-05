@@ -4,7 +4,7 @@ import { sendTgNotification, isTgConfigured } from "@/lib/notify";
 import { getSession, createSession, clearSession } from "@/lib/session";
 import { sanitizeUser } from "@/lib/db";
 import {
-  dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
+  dbGetAdminStats, dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
   dbChangePassword,
   dbVerifyPhone, dbGenerateVerificationCode,
   dbGetPublicListings, dbGetPublicListingsCount, dbGetListingById, dbGetListingByIdAdmin, dbGetHostListingById,
@@ -462,6 +462,11 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Admin Notifications ──
+      case "getAdminStats": {
+        const stats = await dbGetAdminStats();
+        return NextResponse.json({ ok: true, data: stats });
+      }
+
       case "getAdminNotifications": {
         const list = await dbGetAdminNotifications();
         return NextResponse.json({ ok: true, data: list });

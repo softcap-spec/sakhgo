@@ -24,7 +24,7 @@ import {
   ArrowLeft, Shield, Users, Store, Banknote, CheckCircle, XCircle,
   Eye, Ban, UserCog, TrendingUp, Clock, Search, Filter, DollarSign,
   FileText, Save, Bold, Italic, Heading, List, ListOrdered,
-  Pencil, Tag, Plus, Trash2, Megaphone, Image, MessageSquare, Rocket
+  Pencil, Tag, Plus, Trash2, Megaphone, Image, MessageSquare, Rocket, LayoutDashboard, BarChart3, UserPlus
 } from "lucide-react";
 import { NotificationBell } from "@/components/notification-bell";
 import { ReviewsTab } from "@/components/reviews-tab";
@@ -70,18 +70,138 @@ const ADMIN_USER = { name: "Александр", email: "alex@example.com", role
 
 type ContentSection = "howItWorks" | "faq" | "cancelPolicy" | "support" | "hostInfo" | "rules";
 
+function DashboardTab({ stats }: { stats: any }) {
+  const formatNum = (n?: number) => (n != null ? n.toLocaleString("ru-RU") : "—");
+  const formatRub = (n?: number) => (n != null ? n.toLocaleString("ru-RU") + " ₽" : "—");
+
+  const roleLabels: Record<string, string> = {
+    admin: "Админ", host: "Хосты", traveler: "Путешественники",
+    user: "Пользователи", vendor: "Продавцы", guide: "Гиды"
+  };
+
+  if (!stats) {
+    return <div className="flex items-center justify-center h-64 text-muted-foreground">Загрузка...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Top KPI cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          label="Всего пользователей" value={formatNum(stats.totalUsers)}
+          sub={stats.newUsers7d > 0 ? `+${stats.newUsers7d} за неделю` : "0 за неделю"}
+          icon={Users} color="blue"
+        />
+        <StatCard
+          label="Объявлений" value={formatNum(stats.totalListings)}
+          sub={`${formatNum(stats.activeListings)} активных · ${formatNum(stats.pendingEdits)} на модерации`}
+          icon={Store} color="green"
+        />
+        <StatCard
+          label="Броней всего" value={formatNum(stats.totalBookings)}
+          sub={stats.newBookings7d > 0 ? `+${stats.newBookings7d} за неделю` : "0 за неделю"}
+          icon={Banknote} color="amber"
+        />
+        <StatCard
+          label="Доход от продвижения" value={formatRub(stats.promoRevenue)}
+          sub={"Оплаченные размещения"}
+          icon={TrendingUp} color="red"
+        />
+      </div>
+
+      {/* Weekly activity */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl border bg-card p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+            <UserPlus className="w-4 h-4" /> Новые пользователи за 7 дней
+          </div>
+          <div className="text-3xl font-bold">{formatNum(stats.newUsers7d)}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            Всего: {formatNum(stats.totalUsers)}
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+            <Store className="w-4 h-4" /> Новые объявления за 7 дней
+          </div>
+          <div className="text-3xl font-bold">{formatNum(stats.newListings7d)}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            Всего: {formatNum(stats.totalListings)} · Активно: {formatNum(stats.activeListings)}
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+            <Banknote className="w-4 h-4" /> Новые брони за 7 дней
+          </div>
+          <div className="text-3xl font-bold">{formatNum(stats.newBookings7d)}</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            Всего: {formatNum(stats.totalBookings)}
+          </div>
+        </div>
+      </div>
+
+      {/* Role distribution */}
+      {(stats.usersByRole && stats.usersByRole.length > 0) && (
+        <div className="rounded-xl border bg-card p-5">
+          <div className="text-sm font-medium mb-3">Пользователи по ролям</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {stats.usersByRole.map((r: { role: string; count: number }) => (
+              <div key={r.role} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <span className="text-sm">{roleLabels[r.role] || r.role}</span>
+                <Badge variant="secondary">{r.count}</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, icon: Icon, color }: {
+  label: string; value: string; sub: string; icon: any; color: "blue" | "green" | "amber" | "red";
+}) {
+  const colors = {
+    blue: "from-blue-500/10 to-blue-500/5 border-blue-500/20",
+    green: "from-green-500/10 to-green-500/5 border-green-500/20",
+    amber: "from-amber-500/10 to-amber-500/5 border-amber-500/20",
+    red: "from-red-500/10 to-red-500/5 border-red-500/20",
+  };
+  const icons = {
+    blue: "text-blue-500", green: "text-green-500", amber: "text-amber-500", red: "text-red-500",
+  };
+  return (
+    <div className={`rounded-xl border bg-gradient-to-br ${colors[color]} p-5`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <Icon className={`w-5 h-5 ${icons[color]}`} />
+      </div>
+      <div className="text-2xl font-bold">{value}</div>
+      <div className="text-xs text-muted-foreground mt-1">{sub}</div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const store = useStore();
   const router = useRouter();
   const didMount = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [tab, setTab] = useState<"moderation" | "reviews" | "users" | "listings" | "payments" | "content" | "categories" | "banners" | "builds">("moderation");
+  const [tab, setTab] = useState<"dashboard" | "moderation" | "reviews" | "users" | "listings" | "payments" | "content" | "categories" | "banners" | "builds">("dashboard");
   const [pending, setPending] = useState<typeof PENDING_LISTINGS>([]);
   const [users, setUsers] = useState<typeof USERS>([]);
+  const [stats, setStats] = useState<any>(null);
 
   // If user is logged in as admin, load data
   useEffect(() => {
     if (!store.user || store.user.role !== "admin") return;
+
+    // Load admin stats
+    import("@/lib/api").then(({ apiGetAdminStats }) => {
+      apiGetAdminStats().then((s) => {
+        if (s) setStats(s);
+      }).catch(() => {});
+    });
     // Load pending edits directly from DB
     import("@/lib/api").then(({ apiGetPendingEdits }) => {
       apiGetPendingEdits().then((edits: any[]) => {
@@ -569,6 +689,7 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
 
         <div className="flex gap-1 border-b mb-8 mt-6 overflow-x-auto">
           {([
+            { id: "dashboard", label: "Дашборд", icon: BarChart3 },
             { id: "moderation", label: "Модерация", icon: Eye, count: pending.length },
             { id: "reviews", label: "Отзывы", icon: MessageSquare },
             { id: "users", label: "Пользователи", icon: Users, count: users.length },
@@ -595,6 +716,11 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
         </div>
 
         {/* ── MODERATION ── */}
+
+        {tab === "dashboard" && (
+          <DashboardTab stats={stats} />
+        )}
+
         {tab === "moderation" && (
           <div>
             <div className="flex items-center justify-between mb-6">
