@@ -41,7 +41,6 @@ const ADMIN_ONLY = new Set([
   "addBanner", "updateBanner", "removeBanner",
   "getPendingEdits", "approveEdit", "rejectEdit", "setHelpContent",
   "getAllProfiles",
-  "createMessagesTable", // one-off migration action — TODO: move to a real migration script
   "testTgNotification",
   "searchProfiles",
   "getAdminStats",
@@ -572,7 +571,6 @@ export async function POST(req: NextRequest) {
           listing_title: params.listingTitle ?? "",
           promo_type:    params.promoType,
           duration_days: params.durationDays ?? 7,
-          price:         params.price ?? 0,
         });
         return NextResponse.json({ ok: true, data: promo });
       }
@@ -646,26 +644,7 @@ export async function POST(req: NextRequest) {
         await dbMarkMessagesRead(params.listingId as string, params.userId as string, params.otherId as string);
         return NextResponse.json({ ok: true, data: true });
       }
-      case "createMessagesTable": {
-        await pool.query(`
-          CREATE TABLE messages (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            listing_id UUID REFERENCES listings(id) ON DELETE CASCADE,
-            sender_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-            receiver_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-            text TEXT NOT NULL,
-            read BOOLEAN NOT NULL DEFAULT false,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-          )
-        `);
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_listing ON messages(listing_id)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id)');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_messages_dialog ON messages(listing_id, sender_id, receiver_id)');
-        return NextResponse.json({ ok: true, data: true });
-      }
-
-      // ── Telegram Notifications ──
+      
       case "testTgNotification": {
         if (!isTgConfigured()) {
           return NextResponse.json({ ok: false, error: "Telegram не настроен. Установи TELEGRAM_BOT_TOKEN и TELEGRAM_ADMIN_CHAT_ID в .env.local" });

@@ -67,7 +67,7 @@ export const apiApplyListingPromo = (hostId: string, id: string, promo: string, 
 /** Шаг 1: создаёт/возвращает запись promotions (status=draft) — перед переходом к оплате. */
 export const apiInitPromoPayment = (params: {
   listingId: string; hostId: string; hostName: string; listingTitle: string;
-  promoType: "top" | "urgent" | "highlight"; durationDays: number; price: number;
+  promoType: "top" | "urgent" | "highlight"; durationDays: number;
 }) => call("initPromoPayment", params);
 
 /** Шаг 2: создаёт платёж в ЮKassa, возвращает paymentUrl для редиректа хоста. */

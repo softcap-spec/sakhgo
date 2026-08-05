@@ -111,7 +111,6 @@ export function PromoteModal({
         listingTitle,
         promoType:    selected,
         durationDays: parseInt(duration, 10),
-        price,
       });
 
       const promotionId = initResult?.id;

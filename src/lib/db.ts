@@ -1217,12 +1217,29 @@ export async function dbCreatePromotion(data: {
  */
 export async function dbInitPromoPayment(data: {
   listing_id: string; host_id: string; host_name: string; listing_title: string;
-  promo_type: "top" | "urgent" | "highlight"; duration_days: number; price: number;
+  promo_type: "top" | "urgent" | "highlight"; duration_days: number;
 }) {
-  // Повторно используем незавершённую запись, если она есть (status=draft|pending)
+  const safeDays = Math.min(data.duration_days || 7, 30);
+
+  // Read real price from promo_pricing — never trust client input
+  const { rows: [pricing] } = await pool.query(
+    `SELECT base_price_7d, base_price_14d, base_price_21d, base_price_30d
+     FROM promo_pricing WHERE promo_type = $1 AND enabled = true`,
+    [data.promo_type]
+  );
+  if (!pricing) throw new Error("Tariffs not found for " + data.promo_type);
+
+  const price = safeDays >= 30 ? pricing.base_price_30d
+    : safeDays >= 21 ? pricing.base_price_21d
+    : safeDays >= 14 ? pricing.base_price_14d
+    : pricing.base_price_7d;
+
+  // Reuse existing draft — but only if created < 50 min ago (YooKassa payment_url TTL)
   const { rows: existing } = await pool.query(
     `SELECT id, payment_url FROM promotions
-     WHERE listing_id = $1 AND host_id = $2 AND promo_type = $3 AND status IN ('draft','pending')
+     WHERE listing_id = $1 AND host_id = $2 AND promo_type = $3
+       AND status IN ('draft','pending')
+       AND created_at > now() - INTERVAL '50 minutes'
      ORDER BY created_at DESC LIMIT 1`,
     [data.listing_id, data.host_id, data.promo_type]
   );
@@ -1232,7 +1249,7 @@ export async function dbInitPromoPayment(data: {
     `INSERT INTO promotions (listing_id, host_id, host_name, listing_title, promo_type, duration_days, price, status)
      VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING id`,
     [data.listing_id, data.host_id, data.host_name, data.listing_title,
-     data.promo_type, data.duration_days, data.price]
+     data.promo_type, safeDays, price]
   );
   return rows[0];
 }
