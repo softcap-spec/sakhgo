@@ -1519,6 +1519,7 @@ const BUILD_HISTORY: BuildEntry[] = [
     version: "1.6.0",
     date: "2026-08-05",
     description: "Монетизация: ЮKassa + реальные платежи за продвижение",
+    hash: "9057667",
     changes: [
       "Полная цепочка монетизации: заявка → платёж ЮKassa → активация",
       "lib/yookassa.ts: initYooKassaPayment + проверка вебхуков",

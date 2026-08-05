@@ -59,6 +59,10 @@ export const apiGetHostListingById = (id: string, hostId: string) => call("getHo
 // ── Host listings ──
 export const apiGetMyListings = (hostId: string) => call("getMyListings", { hostId });
 export const apiAddListing = (params: Record<string, unknown>) => call("addListing", params);
+export const apiInitYooKassaPayment = (data: {
+  promotionId: string; hostId: string; listingTitle: string; amountRub: number;
+}) => call('initYooKassaPayment', data);
+
 export const apiCreatePromotion = (data: {
   listing_id: string; host_id: string; host_name: string; listing_title: string;
   promo_type: string; duration_days: number; price: number;

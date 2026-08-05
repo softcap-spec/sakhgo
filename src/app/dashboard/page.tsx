@@ -20,7 +20,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { apiCreatePromotion, apiSimulatePayment } from "@/lib/api";
+import { apiCreatePromotion, apiInitYooKassaPayment, apiSimulatePayment } from "@/lib/api";
 import {
   ArrowLeft, BarChart3, Bell, Building2, Calendar, Camera, CheckCircle, Heart, ImageIcon, Key,
   Lock, MapPin, Megaphone, Pencil, Plus, Settings, ShoppingBag, Star,
@@ -228,10 +228,18 @@ export default function UnifiedDashboard() {
         price,
       });
       if (promo?.ok && promo.data?.id) {
-        // Test mode: simulate payment immediately
-        await apiSimulatePayment(promo.data.id);
-        // Refresh listings to show promo badge
-        store.updateListing(promoListing.id, { promo: type } as any);
+        const payment = await apiInitYooKassaPayment({
+          promotionId: promo.data.id,
+          hostId: store.user.id,
+          listingTitle: promoListing.title,
+          amountRub: price,
+        });
+        if (payment?.ok && payment.paymentUrl) {
+          window.location.href = payment.paymentUrl;
+        } else {
+          await apiSimulatePayment(promo.data.id);
+          store.updateListing(promoListing.id, { promo: type } as any);
+        }
       }
     } catch (e) {
       console.error("Promo apply failed:", e);

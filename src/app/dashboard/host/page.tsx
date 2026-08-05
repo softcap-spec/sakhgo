@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { apiCreatePromotion, apiSimulatePayment } from "@/lib/api";
+import { apiCreatePromotion, apiInitYooKassaPayment, apiSimulatePayment } from "@/lib/api";
 import { ArrowLeft, Building2, Calendar, CheckCircle, Key, Lock, MapPin, Megaphone, Pencil, Plus, Star, ToggleLeft, Trash2, XCircle } from "lucide-react";
 
 const STATUS_BADGE: Record<string, { class: string; label: string }> = {
@@ -108,8 +108,18 @@ export default function HostDashboard() {
         price,
       });
       if (promo?.ok && promo.data?.id) {
-        await apiSimulatePayment(promo.data.id);
-        store.updateListing(promoListing.id, { promo: type } as any);
+        const payment = await apiInitYooKassaPayment({
+          promotionId: promo.data.id,
+          hostId: store.user.id,
+          listingTitle: promoListing.title,
+          amountRub: price,
+        });
+        if (payment?.ok && payment.paymentUrl) {
+          window.location.href = payment.paymentUrl;
+        } else {
+          await apiSimulatePayment(promo.data.id);
+          store.updateListing(promoListing.id, { promo: type } as any);
+        }
       }
     } catch (e) {
       console.error("Promo apply failed:", e);
