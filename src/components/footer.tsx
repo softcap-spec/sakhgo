@@ -47,9 +47,9 @@ export function Footer() {
         <div className="border-t pt-6 flex flex-wrap justify-between gap-4 text-xs text-muted font-mono tracking-wider">
           <span>© 2026 SakhGo · Сахалинская область</span>
           <span className="flex gap-4">
-            <button onClick={() => router.push("/help?section=privacy")} className="hover:text-foreground transition-colors">Конфиденциальность</button>
+            <button onClick={() => router.push("/privacy")} className="hover:text-foreground transition-colors">Конфиденциальность</button>
             <span className="text-border">·</span>
-            <button onClick={() => router.push("/help?section=terms")} className="hover:text-foreground transition-colors">Условия</button>
+            <button onClick={() => router.push("/terms")} className="hover:text-foreground transition-colors">Условия</button>
           </span>
         </div>
       </div>
