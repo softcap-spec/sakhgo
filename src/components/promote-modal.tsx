@@ -64,7 +64,7 @@ interface Props {
   listingTitle: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onApply: (type: PromoType) => void;
+  onApply: (type: PromoType, durationDays: number, price: number) => void;
   currentPromo: PromoType | null;
 }
 
@@ -87,8 +87,10 @@ export function PromoteModal({
 
   const handleApply = () => {
     if (!selected) return;
+    const days = parseInt(duration);
+    const price = finalPrice;
     setSuccess(true);
-    onApply(selected);
+    onApply(selected, days, price);
     setTimeout(() => {
       setSuccess(false);
       setSelected(null);

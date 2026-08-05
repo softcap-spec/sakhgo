@@ -59,6 +59,17 @@ export const apiGetHostListingById = (id: string, hostId: string) => call("getHo
 // ── Host listings ──
 export const apiGetMyListings = (hostId: string) => call("getMyListings", { hostId });
 export const apiAddListing = (params: Record<string, unknown>) => call("addListing", params);
+export const apiCreatePromotion = (data: {
+  listing_id: string; host_id: string; host_name: string; listing_title: string;
+  promo_type: string; duration_days: number; price: number;
+}) => call("createPromotion", data);
+
+
+export const apiSimulatePayment = (promotionId: string) =>
+  call("simulatePayment", { promotionId });
+
+export const apiGetPromoPricing = () => call("getPromoPricing");
+
 export const apiApplyListingPromo = (hostId: string, id: string, promo: string, duration: number = 7) =>
   call("applyListingPromo", { hostId, id, promo, duration });
 
@@ -142,10 +153,8 @@ export const apiGetHostStats = (hostId: string, days?: number) => call("getHostS
 export const apiGetHostListingStats = (hostId: string, listingId: string, days?: number) => call("getHostListingStats", { hostId, listingId, days: days || 7 });
 
 export const apiGetAllPromotions = () => call("getAllPromotions");
-export const apiGetPromoPricing = () => call("getPromoPricing");
 export const apiUpdatePromoPricing = (promoType: string, prices: Record<string,unknown>) => call("updatePromoPricing", { promoType, prices });
 export const apiUpdatePromotionStatus = (id: string, status: string) => call("updatePromotionStatus", { id, status });
-export const apiCreatePromotion = (params: Record<string,unknown>) => call("createPromotion", params);
 export const apiGetPromoStats = () => call("getPromoStats");
 export const apiExpirePromotions = () => call("expirePromotions");
 export const apiGetMyPromotions = (hostId: string) => call("getMyPromotions", { hostId });

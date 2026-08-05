@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { apiCreatePromotion, apiSimulatePayment } from "@/lib/api";
 import { ArrowLeft, Building2, Calendar, CheckCircle, Key, Lock, MapPin, Megaphone, Pencil, Plus, Star, ToggleLeft, Trash2, XCircle } from "lucide-react";
 
 const STATUS_BADGE: Record<string, { class: string; label: string }> = {
@@ -94,9 +95,25 @@ export default function HostDashboard() {
   const handleBookingAction = (bid: string, action: "confirm" | "reject") =>
     store.updateBookingStatus(bid, action === "confirm" ? "confirmed" : "rejected");
 
-  const handlePromoApply = (type: PromoType) => {
-    if (!promoListing) return;
-    store.updateListingPromo(promoListing.id, type);
+  const handlePromoApply = async (type: PromoType, durationDays: number, price: number) => {
+    if (!promoListing || !store.user) return;
+    try {
+      const promo = await apiCreatePromotion({
+        listing_id: promoListing.id,
+        host_id: store.user.id,
+        host_name: store.user.name,
+        listing_title: promoListing.title,
+        promo_type: type,
+        duration_days: durationDays,
+        price,
+      });
+      if (promo?.ok && promo.data?.id) {
+        await apiSimulatePayment(promo.data.id);
+        store.updateListing(promoListing.id, { promo: type } as any);
+      }
+    } catch (e) {
+      console.error("Promo apply failed:", e);
+    }
   };
 
   const PROMO_STYLE: Record<string, string> = {

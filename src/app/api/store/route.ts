@@ -23,8 +23,8 @@ import {
   dbSendMessage, dbGetMessages, dbGetChatList, dbMarkMessagesRead,
   dbGetEmailNotificationPref, dbSetEmailNotificationPref,
   dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
-  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats,
-  dbExpirePromotions,
+  dbGetAllPromotions, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbApplyListingPromo, dbGetPromoStats,
+  dbExpirePromotions, dbCreatePromotion, dbGetPromoPricing,
   dbGetMyPromotions, dbIncrementPromoStats,
   dbCreateEmailVerificationCode, dbVerifyEmail,
   dbCreatePasswordResetToken, dbResetPassword,
@@ -43,6 +43,7 @@ const ADMIN_ONLY = new Set([
   "getAllProfiles",
   "createMessagesTable", // one-off migration action — TODO: move to a real migration script
   "testTgNotification",
+  "simulatePayment",
   "searchProfiles",
   "getAdminStats",
 ]);
@@ -57,6 +58,7 @@ const OWNER_PARAM: Record<string, string> = {
   addListing: "hostId",
   applyListingPromo: "hostId",
   addPendingEdit: "hostId",
+  createPromotion: "hostId",
   addBooking: "guestId",
   addReview: "guestId",
   updateListing: "hostId",
@@ -246,6 +248,11 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Public listings (catalog) ──
+      case "getPromoPricing": {
+        const pricing = await dbGetPromoPricing();
+        return NextResponse.json({ ok: true, data: pricing });
+      }
+
       case "getPublicListings": {
         const listings = await dbGetPublicListings(params);
         const total = await dbGetPublicListingsCount(params);
@@ -292,6 +299,12 @@ export async function POST(req: NextRequest) {
         }
         return NextResponse.json({ ok: true, data: listing });
       }
+      case "createPromotion": {
+        // Host creates a promotion request (pending payment)
+        const promo = await dbCreatePromotion(params);
+        return NextResponse.json({ ok: true, data: promo });
+      }
+
       case "applyListingPromo": {
         const promoResult = await dbApplyListingPromo(params.hostId, params.id, params.promo, params.duration);
         if (promoResult && !promoResult.ok) return NextResponse.json(promoResult, { status: 404 });
@@ -459,6 +472,15 @@ export async function POST(req: NextRequest) {
         const updated = await dbUpdateUserRole(params.id, params.role);
         if (!updated) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
         return NextResponse.json({ ok: true, data: updated });
+      }
+
+      case "simulatePayment": {
+        // Admin simulates a successful payment for a pending promotion
+        const { dbGetPromotionById, dbUpdatePromotionStatus } = await import("@/lib/db");
+        const promo = await dbGetPromotionById(params.promotionId);
+        if (!promo) return NextResponse.json({ ok: false, error: "Promotion not found" }, { status: 404 });
+        await dbUpdatePromotionStatus(params.promotionId, "active");
+        return NextResponse.json({ ok: true, message: "Promotion activated" });
       }
 
       case "searchProfiles": {

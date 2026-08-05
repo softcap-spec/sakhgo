@@ -20,6 +20,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { apiCreatePromotion, apiSimulatePayment } from "@/lib/api";
 import {
   ArrowLeft, BarChart3, Bell, Building2, Calendar, Camera, CheckCircle, Heart, ImageIcon, Key,
   Lock, MapPin, Megaphone, Pencil, Plus, Settings, ShoppingBag, Star,
@@ -214,9 +215,27 @@ export default function UnifiedDashboard() {
   const handleBookingAction = (bid: string, action: "confirm" | "reject") =>
     store.updateBookingStatus(bid, action === "confirm" ? "confirmed" : "rejected");
 
-  const handlePromoApply = (type: PromoType) => {
-    if (!promoListing) return;
-    store.updateListingPromo(promoListing.id, type);
+  const handlePromoApply = async (type: PromoType, durationDays: number, price: number) => {
+    if (!promoListing || !store.user) return;
+    try {
+      const promo = await apiCreatePromotion({
+        listing_id: promoListing.id,
+        host_id: store.user.id,
+        host_name: store.user.name,
+        listing_title: promoListing.title,
+        promo_type: type,
+        duration_days: durationDays,
+        price,
+      });
+      if (promo?.ok && promo.data?.id) {
+        // Test mode: simulate payment immediately
+        await apiSimulatePayment(promo.data.id);
+        // Refresh listings to show promo badge
+        store.updateListing(promoListing.id, { promo: type } as any);
+      }
+    } catch (e) {
+      console.error("Promo apply failed:", e);
+    }
   };
 
   const promoClasses = (promo: string | null) => {

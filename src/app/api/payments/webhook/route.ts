@@ -1,33 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { dbGetPromotionById, dbUpdatePromotionStatus } from "@/lib/db";
 
 /**
  * POST /api/payments/webhook
  *
  * Принимает уведомления от платёжных систем (T-Bank / Yookassa).
+ * Также используется для симуляции платежа в тестовом режиме.
  *
  * Формат входящего тела (унифицированный):
  * {
  *   event: "payment.succeeded" | "payment.canceled" | "refund.succeeded",
  *   object: {
- *     id: string;            // ID платежа в платёжной системе
+ *     id: string;
  *     amount: { value: string; currency: string };
  *     metadata: {
- *       promotion_id: string;  // UUID записи в таблице promotions
- *       listing_id: string;    // UUID объявления
- *       host_id: string;       // UUID владельца
- *       promo_type: "top" | "hot" | "highlight";
+ *       promotion_id: string;
+ *       listing_id: string;
+ *       host_id: string;
+ *       promo_type: "top" | "urgent" | "highlight";
  *     };
  *   }
  * }
  *
- * T-Bank API: https://www.tbank.ru/business/payments/
- * Yookassa API: https://yookassa.ru/developers/api
- *
- * Безопасность:
- * - В продакшене добавить проверку подписи вебхука
- *   (IP-whitelist + HMAC / secret key валидация)
- * - T-Bank: заголовок Tbank-Signature с SHA-256 HMAC
- * - Yookassa: проверять IP из списка Yookassa
+ * Безопасность (TODO для продакшена):
+ * - Проверка подписи вебхука (HMAC)
+ * - IP-whitelist платёжной системы
  */
 
 export async function POST(request: NextRequest) {
@@ -43,75 +40,52 @@ export async function POST(request: NextRequest) {
     }
 
     const { id: paymentId, amount, metadata } = object;
+    const promoId = metadata?.promotion_id;
 
-    if (!metadata?.promotion_id || !metadata?.listing_id) {
+    if (!promoId || !metadata?.listing_id) {
       return NextResponse.json(
         { error: "Missing promotion metadata" },
         { status: 400 }
       );
     }
 
-    console.log(`[Webhook] ${event} | payment: ${paymentId} | promo: ${metadata.promotion_id}`);
+    // Verify promotion exists
+    const promo = await dbGetPromotionById(promoId);
+    if (!promo) {
+      return NextResponse.json(
+        { error: "Promotion not found" },
+        { status: 404 }
+      );
+    }
+
+    console.log(`[Webhook] ${event} | payment: ${paymentId} | promo: ${promoId}`);
 
     switch (event) {
       case "payment.succeeded": {
-        // Активировать продвижение в БД
-        // await supabase
-        //   .from("promotions")
-        //   .update({
-        //     payment_status: "paid",
-        //     paid_at: new Date().toISOString(),
-        //     status: "active",
-        //     starts_at: new Date().toISOString(),
-        //     expires_at: new Date(Date.now() + getDuration(metadata.promo_type)).toISOString(),
-        //     transaction_id: paymentId,
-        //   })
-        //   .eq("id", metadata.promotion_id);
-
-        // Обновить объявление — установить promo_type
-        // await supabase
-        //   .from("listings")
-        //   .update({ promo_type: metadata.promo_type })
-        //   .eq("id", metadata.listing_id);
-
+        await dbUpdatePromotionStatus(promoId, "active");
         return NextResponse.json({
           status: "ok",
           action: "activated",
-          promotion_id: metadata.promotion_id,
+          promotion_id: promoId,
           listing_id: metadata.listing_id,
         });
       }
 
       case "payment.canceled": {
-        // Отменить продвижение
-        // await supabase
-        //   .from("promotions")
-        //   .update({ payment_status: "failed", status: "archived" })
-        //   .eq("id", metadata.promotion_id);
-
+        await dbUpdatePromotionStatus(promoId, "cancelled");
         return NextResponse.json({
           status: "ok",
           action: "canceled",
-          promotion_id: metadata.promotion_id,
+          promotion_id: promoId,
         });
       }
 
       case "refund.succeeded": {
-        // Деактивировать продвижение при возврате
-        // await supabase
-        //   .from("promotions")
-        //   .update({ payment_status: "refunded", status: "archived" })
-        //   .eq("id", metadata.promotion_id);
-
-        // await supabase
-        //   .from("listings")
-        //   .update({ promo_type: null })
-        //   .eq("id", metadata.listing_id);
-
+        await dbUpdatePromotionStatus(promoId, "refunded");
         return NextResponse.json({
           status: "ok",
           action: "refunded",
-          promotion_id: metadata.promotion_id,
+          promotion_id: promoId,
         });
       }
 
@@ -127,19 +101,5 @@ export async function POST(request: NextRequest) {
       { error: "Internal server error" },
       { status: 500 }
     );
-  }
-}
-
-/**
- * Вспомогательная: длительность промо в миллисекундах
- */
-function getDuration(promoType: string): number {
-  switch (promoType) {
-    case "hot":
-      return 3 * 24 * 60 * 60 * 1000; // 3 дня
-    case "top":
-    case "highlight":
-    default:
-      return 7 * 24 * 60 * 60 * 1000; // 7 дней
   }
 }

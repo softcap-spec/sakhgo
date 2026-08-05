@@ -1184,9 +1184,27 @@ export async function dbUpdatePromoPricing(promoType: string, prices: {base_pric
 export async function dbUpdatePromotionStatus(id: string, status: string) {
   const now = new Date().toISOString();
   if (status === 'active') {
-    await pool.query("UPDATE promotions SET status=$2, started_at=$3, expires_at=$3::timestamptz + (duration_days || 7) * INTERVAL '1 day', updated_at=now() WHERE id=$1", [id, status, now]);
-  } else if (status === 'refunded' || status === 'cancelled') {
-    await pool.query("UPDATE promotions SET status=$2, expires_at=now(), updated_at=now() WHERE id=$1", [id, status]);
+    const { rows } = await pool.query(
+      "UPDATE promotions SET status=$2, started_at=$3, expires_at=$3::timestamptz + COALESCE(duration_days, 7) * INTERVAL '1 day', updated_at=now() WHERE id=$1 RETURNING listing_id, promo_type",
+      [id, status, now]
+    );
+    if (rows[0]) {
+      await pool.query(
+        "UPDATE listings SET promo=$2, promo_expires_at=$3::timestamptz + (SELECT COALESCE(duration_days, 7) * INTERVAL '1 day' FROM promotions WHERE id=$1), updated_at=now() WHERE id=$4",
+        [id, rows[0].promo_type, now, rows[0].listing_id]
+      );
+    }
+  } else if (status === 'refunded' || status === 'cancelled' || status === 'expired') {
+    const { rows } = await pool.query(
+      "UPDATE promotions SET status=$2, updated_at=now() WHERE id=$1 RETURNING listing_id",
+      [id, status]
+    );
+    if (rows[0]) {
+      await pool.query(
+        "UPDATE listings SET promo=NULL, promo_expires_at=NULL, updated_at=now() WHERE id=$1",
+        [rows[0].listing_id]
+      );
+    }
   } else {
     await pool.query("UPDATE promotions SET status=$2, updated_at=now() WHERE id=$1", [id, status]);
   }
@@ -1249,6 +1267,11 @@ export async function dbGetPromoStats() {
      FROM promotions`
   );
   return rows[0];
+}
+
+export async function dbGetPromotionById(id: string) {
+  const { rows } = await pool.query("SELECT * FROM promotions WHERE id=$1", [id]);
+  return rows[0] || null;
 }
 
 /** Seller: get own promotions */

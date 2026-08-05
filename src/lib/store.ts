@@ -499,20 +499,8 @@ logout: () => set({ user: null, favorites: [], bookings: [], myListings: [], pen
         })),
 
         updateListingPromo: (id, promo) => {
-          const user = get().user;
-          if (promo) {
-            import("@/lib/api").then(({ apiApplyListingPromo }) => {
-              apiApplyListingPromo(user!.id, id, promo).catch(() => {});
-            });
-          } else {
-            // Removing promo — still needs admin (host can't unset their own promo via self-edit whitelist)
-            import("@/lib/api").then(({ apiUpdateListing }) => {
-              apiUpdateListing(id, user!.id, { promo: null }).catch(() => {});
-            });
-          }
-          set((s) => ({
-            myListings: s.myListings.map((l) => l.id === id ? { ...l, promo } : l),
-          }));
+          // Promo is no longer instant — goes through createPromotion → payment → webhook
+          // This is a no-op; the actual flow is in PromoteModal → createPromotion → simulatePayment
         },
 
         updateListing: async (id, data) => {
