@@ -462,11 +462,14 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </CardContent>
             </Card>
-
-            {/* ── Cross-sell ── */}
-            <CrossSellPanel listingId={listing.id} />
           </div>
         </div>
+
+        {/* ── Cross-sell (full-width, below main grid) ── */}
+        <section className="mt-12">
+          <h2 className="font-display text-2xl mb-6">Похожие предложения</h2>
+          <CrossSellPanel listingId={listing.id} />
+        </section>
       </main>
       <Footer />
     </>
