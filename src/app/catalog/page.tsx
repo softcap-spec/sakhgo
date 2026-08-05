@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { LOCATIONS, LISTING_LABELS } from "@/lib/data";
 import { ListingType } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { useStore, HostListing, labelFromType, formatPrice, priceUnit } from "@/lib/store";
 import { apiExpirePromotions } from "@/lib/api";
 import {
@@ -131,12 +132,14 @@ function CatalogContent() {
         <div className="flex items-center gap-3">
           <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
             <SelectTrigger className="w-[220px]">
-              <SelectValue />
+              <SelectValue>
+                {SORT_OPTIONS.find(o => o.value === sort)?.label ?? "Сортировка"}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {SORT_OPTIONS.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
-                  <span className="flex items-center gap-2"><o.icon className="w-4 h-4" />{o.label}</span>
+                  <o.icon className="w-4 h-4" />{' '}{o.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -247,12 +250,16 @@ function CatalogContent() {
               {items.map((l) => (
                 <Card
                   key={l.id}
-                  className="group overflow-hidden border transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer"
+                  className={cn(
+                  "group overflow-hidden border transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer",
+                  l.promo === "highlight" && "ring-2 ring-violet-500/50",
+                  l.promo === "top" && "ring-2 ring-amber-500/50"
+                )}
                   onClick={() => router.push(`/listings/${l.id}`)}
                 >
                   <div className={`aspect-[4/3] relative overflow-hidden ${l.coverImage || l.images?.length ? '' : 'bg-gradient-to-br ' + (TYPE_BG[l.type] || 'from-slate-200 via-slate-300 to-slate-400')}`}>
                     {(l.coverImage || (l.images && l.images.length > 0)) ? (
-                      <img src={l.coverImage || l.images![0]} alt={l.title} className="w-full h-full object-cover" />
+                      <img src={l.coverImage || l.images![0]} alt={l.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <span className="font-display italic text-4xl text-white/25">
@@ -264,12 +271,19 @@ function CatalogContent() {
                       {labelFromType(l.type)}
                     </Badge>
                     {l.promo && (
-                      <Badge variant="secondary" className="absolute top-3 right-12 bg-amber-100 text-amber-800 border-amber-200 text-[10px]">
-                        {l.promo === "top" ? "Топ" : l.promo === "highlight" ? "Выбор" : "Срочно"}
+                      <Badge className={cn(
+                        "absolute top-3 right-3 font-mono text-[11px]",
+                        l.promo === "top" && "bg-amber-500 text-white",
+                        l.promo === "highlight" && "bg-violet-500 text-white"
+                      )}>
+                        {l.promo === "top" ? "ТОП" : "Премиум"}
                       </Badge>
                     )}
                     <button
-                      className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/90 border flex items-center justify-center text-muted-foreground hover:text-accent hover:border-accent transition-colors"
+                      className={cn(
+                      "absolute right-3 w-8 h-8 rounded-full bg-white/90 border flex items-center justify-center text-muted-foreground hover:text-accent hover:border-accent transition-colors",
+                        l.promo ? "bottom-3" : "top-3"
+                      )}
                       onClick={(e) => { e.stopPropagation(); store.toggleFavorite(l.id); }}
                     >
                       <Heart className={`w-4 h-4 ${store.isFavorite(l.id) ? "fill-accent text-accent" : ""}`} />
@@ -279,7 +293,7 @@ function CatalogContent() {
                     <p className="text-xs uppercase tracking-widest text-accent font-medium mb-0.5">
                       <MapPin className="w-3 h-3 inline mr-0.5" />{l.location}
                     </p>
-                    <h3 className="font-display text-lg leading-tight mb-2">{l.title}</h3>
+                    <h3 className="font-display text-lg leading-tight mb-2 text-foreground line-clamp-1">{l.title}</h3>
                     <div className="flex gap-3 text-sm text-muted-foreground mb-3">
                       {l.type === 'property' && l.roomsCount && <span>{l.roomsCount} комн.</span>}
                       {l.maxGuests && l.type !== 'rental_gear' && <span>до {l.maxGuests} гостей</span>}
