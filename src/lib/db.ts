@@ -1184,27 +1184,9 @@ export async function dbUpdatePromoPricing(promoType: string, prices: {base_pric
 export async function dbUpdatePromotionStatus(id: string, status: string) {
   const now = new Date().toISOString();
   if (status === 'active') {
-    const { rows } = await pool.query(
-      "UPDATE promotions SET status=$2, started_at=$3, expires_at=$3::timestamptz + COALESCE(duration_days, 7) * INTERVAL '1 day', updated_at=now() WHERE id=$1 RETURNING listing_id, promo_type",
-      [id, status, now]
-    );
-    if (rows[0]) {
-      await pool.query(
-        "UPDATE listings SET promo=$2, promo_expires_at=$3::timestamptz + (SELECT COALESCE(duration_days, 7) * INTERVAL '1 day' FROM promotions WHERE id=$1), updated_at=now() WHERE id=$4",
-        [id, rows[0].promo_type, now, rows[0].listing_id]
-      );
-    }
-  } else if (status === 'refunded' || status === 'cancelled' || status === 'expired') {
-    const { rows } = await pool.query(
-      "UPDATE promotions SET status=$2, updated_at=now() WHERE id=$1 RETURNING listing_id",
-      [id, status]
-    );
-    if (rows[0]) {
-      await pool.query(
-        "UPDATE listings SET promo=NULL, promo_expires_at=NULL, updated_at=now() WHERE id=$1",
-        [rows[0].listing_id]
-      );
-    }
+    await pool.query("UPDATE promotions SET status=$2, started_at=$3, expires_at=$3::timestamptz + (duration_days || 7) * INTERVAL '1 day', updated_at=now() WHERE id=$1", [id, status, now]);
+  } else if (status === 'refunded' || status === 'cancelled') {
+    await pool.query("UPDATE promotions SET status=$2, expires_at=now(), updated_at=now() WHERE id=$1", [id, status]);
   } else {
     await pool.query("UPDATE promotions SET status=$2, updated_at=now() WHERE id=$1", [id, status]);
   }
@@ -1216,8 +1198,35 @@ export async function dbCreatePromotion(data: {
 }) {
   const { rows } = await pool.query(
     `INSERT INTO promotions (listing_id, host_id, host_name, listing_title, promo_type, duration_days, price, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING *`,
     [data.listing_id, data.host_id, data.host_name, data.listing_title, data.promo_type, data.duration_days, data.price]
+  );
+  return rows[0];
+}
+
+/**
+ * Подготавливает запись продвижения к оплате.
+ * Если для этого объявления уже есть незавершённый платёж — возвращает его.
+ * Вызывается перед редиректом на ЮKassa; сам платёж создаётся в /api/payments/create.
+ */
+export async function dbInitPromoPayment(data: {
+  listing_id: string; host_id: string; host_name: string; listing_title: string;
+  promo_type: "top" | "urgent" | "highlight"; duration_days: number; price: number;
+}) {
+  // Повторно используем незавершённую запись, если она есть (status=draft|pending)
+  const { rows: existing } = await pool.query(
+    `SELECT id, payment_url FROM promotions
+     WHERE listing_id = $1 AND host_id = $2 AND promo_type = $3 AND status IN ('draft','pending')
+     ORDER BY created_at DESC LIMIT 1`,
+    [data.listing_id, data.host_id, data.promo_type]
+  );
+  if (existing[0]) return existing[0];
+
+  const { rows } = await pool.query(
+    `INSERT INTO promotions (listing_id, host_id, host_name, listing_title, promo_type, duration_days, price, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING id`,
+    [data.listing_id, data.host_id, data.host_name, data.listing_title,
+     data.promo_type, data.duration_days, data.price]
   );
   return rows[0];
 }
@@ -1267,11 +1276,6 @@ export async function dbGetPromoStats() {
      FROM promotions`
   );
   return rows[0];
-}
-
-export async function dbGetPromotionById(id: string) {
-  const { rows } = await pool.query("SELECT * FROM promotions WHERE id=$1", [id]);
-  return rows[0] || null;
 }
 
 /** Seller: get own promotions */

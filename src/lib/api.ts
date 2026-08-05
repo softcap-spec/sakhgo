@@ -59,23 +59,28 @@ export const apiGetHostListingById = (id: string, hostId: string) => call("getHo
 // ── Host listings ──
 export const apiGetMyListings = (hostId: string) => call("getMyListings", { hostId });
 export const apiAddListing = (params: Record<string, unknown>) => call("addListing", params);
-export const apiInitYooKassaPayment = (data: {
-  promotionId: string; hostId: string; listingTitle: string; amountRub: number;
-}) => call('initYooKassaPayment', data);
-
-export const apiCreatePromotion = (data: {
-  listing_id: string; host_id: string; host_name: string; listing_title: string;
-  promo_type: string; duration_days: number; price: number;
-}) => call("createPromotion", data);
-
-
-export const apiSimulatePayment = (promotionId: string) =>
-  call("simulatePayment", { promotionId });
-
-export const apiGetPromoPricing = () => call("getPromoPricing");
-
 export const apiApplyListingPromo = (hostId: string, id: string, promo: string, duration: number = 7) =>
   call("applyListingPromo", { hostId, id, promo, duration });
+
+// ── Payments (ЮKassa) ──
+
+/** Шаг 1: создаёт/возвращает запись promotions (status=draft) — перед переходом к оплате. */
+export const apiInitPromoPayment = (params: {
+  listingId: string; hostId: string; hostName: string; listingTitle: string;
+  promoType: "top" | "urgent" | "highlight"; durationDays: number; price: number;
+}) => call("initPromoPayment", params);
+
+/** Шаг 2: создаёт платёж в ЮKassa, возвращает paymentUrl для редиректа хоста. */
+export const apiCreatePayment = async (promotionId: string): Promise<{ paymentUrl: string }> => {
+  const res = await fetch("/api/payments/create", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ promotionId }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? "Ошибка создания платежа");
+  return data.data;
+};
 
 export const apiUpdateListing = (id: string, hostId: string, patch: Record<string, unknown>, images?: string[]) =>
   call("updateListing", { id, hostId, patch, images });
@@ -157,8 +162,10 @@ export const apiGetHostStats = (hostId: string, days?: number) => call("getHostS
 export const apiGetHostListingStats = (hostId: string, listingId: string, days?: number) => call("getHostListingStats", { hostId, listingId, days: days || 7 });
 
 export const apiGetAllPromotions = () => call("getAllPromotions");
+export const apiGetPromoPricing = () => call("getPromoPricing");
 export const apiUpdatePromoPricing = (promoType: string, prices: Record<string,unknown>) => call("updatePromoPricing", { promoType, prices });
 export const apiUpdatePromotionStatus = (id: string, status: string) => call("updatePromotionStatus", { id, status });
+export const apiCreatePromotion = (params: Record<string,unknown>) => call("createPromotion", params);
 export const apiGetPromoStats = () => call("getPromoStats");
 export const apiExpirePromotions = () => call("expirePromotions");
 export const apiGetMyPromotions = (hostId: string) => call("getMyPromotions", { hostId });

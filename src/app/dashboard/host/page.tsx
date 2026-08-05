@@ -17,7 +17,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { apiCreatePromotion, apiInitYooKassaPayment, apiSimulatePayment } from "@/lib/api";
 import { ArrowLeft, Building2, Calendar, CheckCircle, Key, Lock, MapPin, Megaphone, Pencil, Plus, Star, ToggleLeft, Trash2, XCircle } from "lucide-react";
 
 const STATUS_BADGE: Record<string, { class: string; label: string }> = {
@@ -94,37 +93,6 @@ export default function HostDashboard() {
 
   const handleBookingAction = (bid: string, action: "confirm" | "reject") =>
     store.updateBookingStatus(bid, action === "confirm" ? "confirmed" : "rejected");
-
-  const handlePromoApply = async (type: PromoType, durationDays: number, price: number) => {
-    if (!promoListing || !store.user) return;
-    try {
-      const promo = await apiCreatePromotion({
-        listing_id: promoListing.id,
-        host_id: store.user.id,
-        host_name: store.user.name,
-        listing_title: promoListing.title,
-        promo_type: type,
-        duration_days: durationDays,
-        price,
-      });
-      if (promo?.ok && promo.data?.id) {
-        const payment = await apiInitYooKassaPayment({
-          promotionId: promo.data.id,
-          hostId: store.user.id,
-          listingTitle: promoListing.title,
-          amountRub: price,
-        });
-        if (payment?.ok && payment.paymentUrl) {
-          window.location.href = payment.paymentUrl;
-        } else {
-          await apiSimulatePayment(promo.data.id);
-          store.updateListing(promoListing.id, { promo: type } as any);
-        }
-      }
-    } catch (e) {
-      console.error("Promo apply failed:", e);
-    }
-  };
 
   const PROMO_STYLE: Record<string, string> = {
     top: "bg-amber-500 text-white",
@@ -371,7 +339,7 @@ export default function HostDashboard() {
           <PromoteModal
             listingId={promoListing.id} listingTitle={promoListing.title}
             open={!!promoListing} onOpenChange={(v) => { if (!v) setPromoListing(null); }}
-            onApply={handlePromoApply} currentPromo={promoListing.promo}
+            currentPromo={promoListing.promo}
           />
         )}
       </main>

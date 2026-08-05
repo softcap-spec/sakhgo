@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/pg";
-import { initYooKassaPayment } from "@/lib/yookassa";
 import { sendTgNotification, isTgConfigured } from "@/lib/notify";
 import { getSession, createSession, clearSession } from "@/lib/session";
 import { sanitizeUser } from "@/lib/db";
@@ -24,9 +23,9 @@ import {
   dbSendMessage, dbGetMessages, dbGetChatList, dbMarkMessagesRead,
   dbGetEmailNotificationPref, dbSetEmailNotificationPref,
   dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
-  dbGetAllPromotions, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbApplyListingPromo, dbGetPromoStats,
-  dbExpirePromotions, dbCreatePromotion, dbGetPromoPricing,
-  dbGetMyPromotions, dbGetPromotionById, dbIncrementPromoStats,
+  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats, dbInitPromoPayment,
+  dbExpirePromotions,
+  dbGetMyPromotions, dbIncrementPromoStats,
   dbCreateEmailVerificationCode, dbVerifyEmail,
   dbCreatePasswordResetToken, dbResetPassword,
 } from "@/lib/db";
@@ -37,14 +36,13 @@ export const dynamic = "force-dynamic";
 const ADMIN_ONLY = new Set([
   "getAllProfiles", "getAllListings", "getListingByIdAdmin", "adminUpdateListing", "approveListing", "updateUserRole",
   "moderateReview", "getPendingReviews", "updatePromoPricing", "updatePromotionStatus",
-  "getAllPromotions", "getPromoStats", "expirePromotions",
+  "getAllPromotions", "getPromoStats", "expirePromotions", "createPromotion",
   "getAdminNotifications", "getUnreadCount", "markNotificationRead", "markAllNotificationsRead",
   "addBanner", "updateBanner", "removeBanner",
   "getPendingEdits", "approveEdit", "rejectEdit", "setHelpContent",
   "getAllProfiles",
   "createMessagesTable", // one-off migration action — TODO: move to a real migration script
   "testTgNotification",
-  "simulatePayment",
   "searchProfiles",
   "getAdminStats",
 ]);
@@ -59,8 +57,7 @@ const OWNER_PARAM: Record<string, string> = {
   addListing: "hostId",
   applyListingPromo: "hostId",
   addPendingEdit: "hostId",
-  createPromotion: "hostId",
-  initYooKassaPayment: "hostId",
+  initPromoPayment:  "hostId",
   addBooking: "guestId",
   addReview: "guestId",
   updateListing: "hostId",
@@ -250,17 +247,6 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Public listings (catalog) ──
-      case "getPromotionStatus": {
-        const promo = await dbGetPromotionById(params.promotionId);
-        if (!promo) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-        return NextResponse.json({ ok: true, status: promo.status });
-      }
-
-      case "getPromoPricing": {
-        const pricing = await dbGetPromoPricing();
-        return NextResponse.json({ ok: true, data: pricing });
-      }
-
       case "getPublicListings": {
         const listings = await dbGetPublicListings(params);
         const total = await dbGetPublicListingsCount(params);
@@ -307,25 +293,6 @@ export async function POST(req: NextRequest) {
         }
         return NextResponse.json({ ok: true, data: listing });
       }
-      case "initYooKassaPayment": {
-        const result = await initYooKassaPayment({
-          promotionId: params.promotionId,
-          hostId: params.hostId,
-          listingTitle: params.listingTitle || "Объявление",
-          amountRub: params.amountRub,
-        });
-        if (result.success) {
-          return NextResponse.json({ ok: true, paymentUrl: result.paymentUrl, paymentId: result.paymentId });
-        }
-        return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
-      }
-
-            case "createPromotion": {
-        // Host creates a promotion request (pending payment)
-        const promo = await dbCreatePromotion(params);
-        return NextResponse.json({ ok: true, data: promo });
-      }
-
       case "applyListingPromo": {
         const promoResult = await dbApplyListingPromo(params.hostId, params.id, params.promo, params.duration);
         if (promoResult && !promoResult.ok) return NextResponse.json(promoResult, { status: 404 });
@@ -495,15 +462,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, data: updated });
       }
 
-      case "simulatePayment": {
-        // Admin simulates a successful payment for a pending promotion
-        const { dbGetPromotionById, dbUpdatePromotionStatus } = await import("@/lib/db");
-        const promo = await dbGetPromotionById(params.promotionId);
-        if (!promo) return NextResponse.json({ ok: false, error: "Promotion not found" }, { status: 404 });
-        await dbUpdatePromotionStatus(params.promotionId, "active");
-        return NextResponse.json({ ok: true, message: "Promotion activated" });
-      }
-
       case "searchProfiles": {
         const { search, page = 1, pageSize = 15 } = params;
         const result = await dbSearchProfiles(search || "", page, pageSize);
@@ -587,12 +545,6 @@ export async function POST(req: NextRequest) {
         const promos = await dbGetAllPromotions();
         return NextResponse.json({ ok: true, data: promos });
       }
-      case "getPromotionStatus": {
-        const promo = await dbGetPromotionById(params.promotionId);
-        if (!promo) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-        return NextResponse.json({ ok: true, status: promo.status });
-      }
-
       case "getPromoPricing": {
         const prices = await dbGetPromoPricing();
         return NextResponse.json({ ok: true, data: prices });
@@ -605,7 +557,25 @@ export async function POST(req: NextRequest) {
         await dbUpdatePromotionStatus(params.id, params.status);
         return NextResponse.json({ ok: true });
       }
-
+      case "createPromotion": {
+        const pm = await dbCreatePromotion(params);
+        return NextResponse.json({ ok: true, data: pm });
+      }
+      case "initPromoPayment": {
+        // Создаёт или возвращает существующую запись promotions (status=draft/pending).
+        // После этого клиент вызывает /api/payments/create с полученным promotion_id
+        // и получает paymentUrl для редиректа на ЮKassa.
+        const promo = await dbInitPromoPayment({
+          listing_id:    params.listingId,
+          host_id:       params.hostId,
+          host_name:     params.hostName ?? "",
+          listing_title: params.listingTitle ?? "",
+          promo_type:    params.promoType,
+          duration_days: params.durationDays ?? 7,
+          price:         params.price ?? 0,
+        });
+        return NextResponse.json({ ok: true, data: promo });
+      }
       case "getPromoStats": {
         const stats = await dbGetPromoStats();
         return NextResponse.json({ ok: true, data: stats });

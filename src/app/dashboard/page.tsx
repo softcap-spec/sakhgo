@@ -20,7 +20,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { apiCreatePromotion, apiInitYooKassaPayment, apiSimulatePayment } from "@/lib/api";
 import {
   ArrowLeft, BarChart3, Bell, Building2, Calendar, Camera, CheckCircle, Heart, ImageIcon, Key,
   Lock, MapPin, Megaphone, Pencil, Plus, Settings, ShoppingBag, Star,
@@ -214,37 +213,6 @@ export default function UnifiedDashboard() {
 
   const handleBookingAction = (bid: string, action: "confirm" | "reject") =>
     store.updateBookingStatus(bid, action === "confirm" ? "confirmed" : "rejected");
-
-  const handlePromoApply = async (type: PromoType, durationDays: number, price: number) => {
-    if (!promoListing || !store.user) return;
-    try {
-      const promo = await apiCreatePromotion({
-        listing_id: promoListing.id,
-        host_id: store.user.id,
-        host_name: store.user.name,
-        listing_title: promoListing.title,
-        promo_type: type,
-        duration_days: durationDays,
-        price,
-      });
-      if (promo?.ok && promo.data?.id) {
-        const payment = await apiInitYooKassaPayment({
-          promotionId: promo.data.id,
-          hostId: store.user.id,
-          listingTitle: promoListing.title,
-          amountRub: price,
-        });
-        if (payment?.ok && payment.paymentUrl) {
-          window.location.href = payment.paymentUrl;
-        } else {
-          await apiSimulatePayment(promo.data.id);
-          store.updateListing(promoListing.id, { promo: type } as any);
-        }
-      }
-    } catch (e) {
-      console.error("Promo apply failed:", e);
-    }
-  };
 
   const promoClasses = (promo: string | null) => {
     if (!promo) return "";
@@ -854,7 +822,7 @@ export default function UnifiedDashboard() {
           <PromoteModal
             listingId={promoListing.id} listingTitle={promoListing.title}
             open={!!promoListing} onOpenChange={(v) => { if (!v) setPromoListing(null); }}
-            onApply={handlePromoApply} currentPromo={promoListing.promo}
+            currentPromo={promoListing.promo}
           />
         )}
       </main>

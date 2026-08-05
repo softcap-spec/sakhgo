@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ЮKassa — интеграция оплаты продвижения
 
-## Getting Started
+## Новые файлы
 
-First, run the development server:
+| Файл | Что делает |
+|---|---|
+| `migrations/012_yookassa_payments.sql` | Добавляет колонки `payment_id`, `idempotency_key`, `payment_url`, `paid_at`, `refunded_at` в `promotions`; создаёт таблицу `payment_events` для идемпотентности вебхуков |
+| `src/app/api/payments/create/route.ts` | Шаг 2 флоу: создаёт платёж в ЮKassa, возвращает `paymentUrl` |
+| `src/app/api/payments/webhook/route.ts` | Принимает события от ЮKassa, проверяет IP, идемпотентен, активирует промо |
+
+## Изменённые файлы
+
+| Файл | Изменения |
+|---|---|
+| `src/lib/db.ts` | Добавлен `dbInitPromoPayment`; `dbCreatePromotion` теперь создаёт с `status='draft'` |
+| `src/lib/api.ts` | Добавлены `apiInitPromoPayment`, `apiCreatePayment` |
+| `src/app/api/store/route.ts` | Добавлен `case "initPromoPayment"` в `OWNER_PARAM` + switch |
+| `src/components/promote-modal.tsx` | Полный переход на двухшаговый платёжный флоу, убран `onApply` |
+| `src/app/dashboard/page.tsx` | Убраны `handlePromoApply` и `onApply` |
+| `src/app/dashboard/host/page.tsx` | Убраны `handlePromoApply` и `onApply` |
+
+## Применение
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# Патч одной командой (из корня репозитория):
+git apply yookassa.patch
+
+# Или скопируйте файлы вручную (пути совпадают 1:1 с репозиторием)
+
+# Миграция БД:
+psql $DATABASE_URL -f migrations/012_yookassa_payments.sql
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Переменные окружения (добавить в .env)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+YOOKASSA_SHOP_ID=ваш_shopId_из_кабинета_ЮKassa
+YOOKASSA_SECRET=ваш_секретный_ключ_из_кабинета_ЮKassa
+NEXT_PUBLIC_BASE_URL=https://sakhgo.ru
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Настройка вебхука в кабинете ЮKassa
 
-## Learn More
+1. Личный кабинет → Интеграция → HTTP-уведомления
+2. URL: `https://sakhgo.ru/api/payments/webhook`
+3. События: `payment.succeeded`, `payment.canceled`, `refund.succeeded`
 
-To learn more about Next.js, take a look at the following resources:
+## Флоу оплаты
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+Хост нажимает «Продвинуть»
+  → promote-modal показывает выбор типа и срока
+  → нажимает «Оплатить через ЮKassa»
+  → POST /api/store {action:"initPromoPayment"} → создаёт promotions (status=draft)
+  → POST /api/payments/create {promotionId}    → создаёт платёж в ЮKassa API
+  → redirect на paymentUrl (страница оплаты ЮKassa)
+  → хост платит картой / СБП
+  → ЮKassa POST /api/payments/webhook {event:"payment.succeeded"}
+  → сервер проверяет IP + идемпотентность + верифицирует статус через ЮKassa API
+  → promotions.status = 'active', listings.promo = тип
+  → хост видит активное продвижение в личном кабинете
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Чек «Мой налог»
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Формировать вручную в приложении «Мой налог» после каждой оплаты.
+Если объём вырастет — подключить API ФНС «Мой налог» отдельно.

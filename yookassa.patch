@@ -1,0 +1,939 @@
+diff --git a/src/app/api/payments/webhook/route.ts b/src/app/api/payments/webhook/route.ts
+index 5e8ed94..b0a4cbc 100644
+--- a/src/app/api/payments/webhook/route.ts
++++ b/src/app/api/payments/webhook/route.ts
+@@ -1,145 +1,231 @@
+-import { NextRequest, NextResponse } from "next/server";
+-
+ /**
+  * POST /api/payments/webhook
+  *
+- * Принимает уведомления от платёжных систем (T-Bank / Yookassa).
+- *
+- * Формат входящего тела (унифицированный):
+- * {
+- *   event: "payment.succeeded" | "payment.canceled" | "refund.succeeded",
+- *   object: {
+- *     id: string;            // ID платежа в платёжной системе
+- *     amount: { value: string; currency: string };
+- *     metadata: {
+- *       promotion_id: string;  // UUID записи в таблице promotions
+- *       listing_id: string;    // UUID объявления
+- *       host_id: string;       // UUID владельца
+- *       promo_type: "top" | "hot" | "highlight";
+- *     };
+- *   }
+- * }
++ * Принимает уведомления от ЮKassa о статусе платежа.
+  *
+- * T-Bank API: https://www.tbank.ru/business/payments/
+- * Yookassa API: https://yookassa.ru/developers/api
++ * Безопасность (ЮKassa не использует HMAC-подпись на теле запроса — только IP-whitelist):
++ *   — Проверяем IP отправителя по официальному списку ЮKassa
++ *   — Идемпотентность: каждый event_id пишем в payment_events ОДИН раз
++ *   — После записи события запрашиваем актуальный статус платежа из ЮKassa API
++ *     (не доверяем телу вебхука напрямую — защита от replay/spoofing)
+  *
+- * Безопасность:
+- * - В продакшене добавить проверку подписи вебхука
+- *   (IP-whitelist + HMAC / secret key валидация)
+- * - T-Bank: заголовок Tbank-Signature с SHA-256 HMAC
+- * - Yookassa: проверять IP из списка Yookassa
++ * Документация: https://yookassa.ru/developers/using-api/webhooks
+  */
+ 
+-export async function POST(request: NextRequest) {
++import { NextRequest, NextResponse } from "next/server";
++import pool from "@/lib/pg";
++
++export const dynamic = "force-dynamic";
++
++// Официальные IP ЮKassa для webhook-уведомлений
++// Актуальный список: https://yookassa.ru/developers/using-api/webhooks#ip
++const YOOKASSA_IPS = new Set([
++  "185.71.76.0/27",
++  "185.71.77.0/27",
++  "77.75.153.0/25",
++  "77.75.156.11",
++  "77.75.156.35",
++  "77.75.154.128/25",
++  "2a02:5180::/32",
++]);
++
++// Простая проверка по точному IP (без CIDR) — достаточно для большинства случаев.
++// Если сервер за Nginx/proxy — X-Real-IP или X-Forwarded-For должен прокидываться.
++function isYookassaIP(ip: string): boolean {
++  // Точные совпадения
++  if (YOOKASSA_IPS.has(ip)) return true;
++  // CIDR-проверка для основных диапазонов (упрощённо — проверяем первые октеты)
++  const cidrs = [
++    { prefix: "185.71.76.", bits: 27, start: 0,   end: 31  },
++    { prefix: "185.71.77.", bits: 27, start: 0,   end: 31  },
++    { prefix: "77.75.153.", bits: 25, start: 0,   end: 127 },
++    { prefix: "77.75.154.", bits: 25, start: 128, end: 255 },
++  ];
++  for (const { prefix, start, end } of cidrs) {
++    if (ip.startsWith(prefix)) {
++      const last = parseInt(ip.split(".")[3] ?? "-1", 10);
++      if (last >= start && last <= end) return true;
++    }
++  }
++  return false;
++}
++
++const SHOP_ID = process.env.YOOKASSA_SHOP_ID;
++const SECRET  = process.env.YOOKASSA_SECRET;
++
++async function getYookassaPayment(paymentId: string) {
++  const res = await fetch(`https://api.yookassa.ru/v3/payments/${paymentId}`, {
++    headers: {
++      "Authorization": "Basic " + Buffer.from(`${SHOP_ID}:${SECRET}`).toString("base64"),
++    },
++  });
++  if (!res.ok) return null;
++  return res.json();
++}
++
++export async function POST(req: NextRequest) {
++  // 1. Проверяем IP
++  const forwarded = req.headers.get("x-forwarded-for");
++  const realIp    = req.headers.get("x-real-ip");
++  const clientIp  = (forwarded?.split(",")[0] ?? realIp ?? "").trim();
++
++  if (!isYookassaIP(clientIp)) {
++    console.warn(`[webhook] Rejected unknown IP: ${clientIp}`);
++    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
++  }
++
++  // 2. Парсим тело
++  let body: any;
+   try {
+-    const body = await request.json();
+-    const { event, object } = body;
++    body = await req.json();
++  } catch {
++    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
++  }
+ 
+-    if (!event || !object) {
+-      return NextResponse.json(
+-        { error: "Missing event or object" },
+-        { status: 400 }
+-      );
++  const eventType  = body?.event        as string | undefined;
++  const paymentId  = body?.object?.id   as string | undefined;
++  const metadata   = body?.object?.metadata ?? {};
++  const promotionId = metadata?.promotion_id as string | undefined;
++
++  if (!eventType || !paymentId) {
++    return NextResponse.json({ error: "Missing event or object.id" }, { status: 400 });
++  }
++
++  // event_id — используем paymentId+eventType как уникальный ключ (ЮKassa не шлёт отдельный event UUID)
++  const eventId = `${paymentId}::${eventType}`;
++
++  // 3. Идемпотентность — пишем событие в лог; если уже есть — отвечаем 200 без повторной обработки
++  try {
++    await pool.query(
++      `INSERT INTO payment_events (event_id, event_type, payment_id, promotion_id, raw_body)
++       VALUES ($1, $2, $3, $4, $5)`,
++      [eventId, eventType, paymentId, promotionId ?? null, JSON.stringify(body)]
++    );
++  } catch (err: any) {
++    if (err?.code === "23505") {
++      // unique_violation — уже обрабатывали это событие
++      console.log(`[webhook] Duplicate event ${eventId}, skipping`);
++      return NextResponse.json({ status: "already_processed" });
++    }
++    throw err;
++  }
++
++  // 4. Для payment.succeeded — верифицируем статус напрямую через API (не доверяем только вебхуку)
++  if (eventType === "payment.succeeded") {
++    if (!promotionId) {
++      console.error(`[webhook] payment.succeeded without promotion_id, paymentId=${paymentId}`);
++      return NextResponse.json({ status: "ok_no_promo" });
+     }
+ 
+-    const { id: paymentId, amount, metadata } = object;
++    // Дополнительная верификация — запрашиваем актуальное состояние платежа у ЮKassa
++    const actualPayment = await getYookassaPayment(paymentId);
++    if (!actualPayment || actualPayment.status !== "succeeded") {
++      console.warn(`[webhook] payment ${paymentId} not confirmed by API, status=${actualPayment?.status}`);
++      return NextResponse.json({ error: "Payment not confirmed" }, { status: 409 });
++    }
+ 
+-    if (!metadata?.promotion_id || !metadata?.listing_id) {
+-      return NextResponse.json(
+-        { error: "Missing promotion metadata" },
+-        { status: 400 }
++    const paidAmount = parseFloat(actualPayment.amount?.value ?? "0");
++
++    // 5. Активируем промо + обновляем объявление в одной транзакции
++    const client = await pool.connect();
++    try {
++      await client.query("BEGIN");
++
++      // Обновляем promotions
++      const { rows: [updated] } = await client.query(
++        `UPDATE promotions
++         SET status    = 'active',
++             paid_at   = now(),
++             starts_at = now(),
++             expires_at = now() + (COALESCE(duration_days, 7) || ' days')::interval,
++             price     = COALESCE(price, $3),
++             updated_at = now()
++         WHERE id = $1 AND payment_id = $2
++         RETURNING id, listing_id, promo_type, duration_days, expires_at`,
++        [promotionId, paymentId, paidAmount]
+       );
+-    }
+ 
+-    console.log(`[Webhook] ${event} | payment: ${paymentId} | promo: ${metadata.promotion_id}`);
+-
+-    switch (event) {
+-      case "payment.succeeded": {
+-        // Активировать продвижение в БД
+-        // await supabase
+-        //   .from("promotions")
+-        //   .update({
+-        //     payment_status: "paid",
+-        //     paid_at: new Date().toISOString(),
+-        //     status: "active",
+-        //     starts_at: new Date().toISOString(),
+-        //     expires_at: new Date(Date.now() + getDuration(metadata.promo_type)).toISOString(),
+-        //     transaction_id: paymentId,
+-        //   })
+-        //   .eq("id", metadata.promotion_id);
+-
+-        // Обновить объявление — установить promo_type
+-        // await supabase
+-        //   .from("listings")
+-        //   .update({ promo_type: metadata.promo_type })
+-        //   .eq("id", metadata.listing_id);
+-
+-        return NextResponse.json({
+-          status: "ok",
+-          action: "activated",
+-          promotion_id: metadata.promotion_id,
+-          listing_id: metadata.listing_id,
+-        });
++      if (!updated) {
++        await client.query("ROLLBACK");
++        console.warn(`[webhook] Promotion not found or payment_id mismatch: promo=${promotionId}`);
++        return NextResponse.json({ error: "Promotion mismatch" }, { status: 409 });
+       }
+ 
+-      case "payment.canceled": {
+-        // Отменить продвижение
+-        // await supabase
+-        //   .from("promotions")
+-        //   .update({ payment_status: "failed", status: "archived" })
+-        //   .eq("id", metadata.promotion_id);
+-
+-        return NextResponse.json({
+-          status: "ok",
+-          action: "canceled",
+-          promotion_id: metadata.promotion_id,
+-        });
+-      }
++      // Обновляем listings.promo + promo_expires_at
++      await client.query(
++        `UPDATE listings
++         SET promo           = $2,
++             promo_expires_at = $3,
++             updated_at       = now()
++         WHERE id = $1`,
++        [updated.listing_id, updated.promo_type, updated.expires_at]
++      );
+ 
+-      case "refund.succeeded": {
+-        // Деактивировать продвижение при возврате
+-        // await supabase
+-        //   .from("promotions")
+-        //   .update({ payment_status: "refunded", status: "archived" })
+-        //   .eq("id", metadata.promotion_id);
+-
+-        // await supabase
+-        //   .from("listings")
+-        //   .update({ promo_type: null })
+-        //   .eq("id", metadata.listing_id);
+-
+-        return NextResponse.json({
+-          status: "ok",
+-          action: "refunded",
+-          promotion_id: metadata.promotion_id,
+-        });
+-      }
++      await client.query("COMMIT");
+ 
+-      default:
+-        return NextResponse.json(
+-          { error: `Unknown event: ${event}` },
+-          { status: 400 }
+-        );
++      console.log(`[webhook] Promotion ${promotionId} activated until ${updated.expires_at}`);
++    } catch (err) {
++      await client.query("ROLLBACK");
++      throw err;
++    } finally {
++      client.release();
+     }
+-  } catch (err) {
+-    console.error("[Webhook] Error:", err);
+-    return NextResponse.json(
+-      { error: "Internal server error" },
+-      { status: 500 }
+-    );
++
++    return NextResponse.json({ status: "ok", action: "activated" });
+   }
+-}
+ 
+-/**
+- * Вспомогательная: длительность промо в миллисекундах
+- */
+-function getDuration(promoType: string): number {
+-  switch (promoType) {
+-    case "hot":
+-      return 3 * 24 * 60 * 60 * 1000; // 3 дня
+-    case "top":
+-    case "highlight":
+-    default:
+-      return 7 * 24 * 60 * 60 * 1000; // 7 дней
++  // 6. payment.canceled — переводим в cancelled
++  if (eventType === "payment.canceled") {
++    if (promotionId) {
++      await pool.query(
++        `UPDATE promotions
++         SET status = 'cancelled', updated_at = now()
++         WHERE id = $1 AND payment_id = $2 AND status = 'pending'`,
++        [promotionId, paymentId]
++      );
++    }
++    return NextResponse.json({ status: "ok", action: "cancelled" });
+   }
++
++  // 7. refund.succeeded — деактивируем промо
++  if (eventType === "refund.succeeded") {
++    if (promotionId) {
++      const client = await pool.connect();
++      try {
++        await client.query("BEGIN");
++
++        const { rows: [promo] } = await client.query(
++          `UPDATE promotions
++           SET status       = 'refunded',
++               refunded_at  = now(),
++               expires_at   = now(),
++               updated_at   = now()
++           WHERE id = $1 AND payment_id = $2
++           RETURNING listing_id`,
++          [promotionId, paymentId]
++        );
++
++        if (promo) {
++          await client.query(
++            `UPDATE listings
++             SET promo = null, promo_expires_at = null, updated_at = now()
++             WHERE id = $1`,
++            [promo.listing_id]
++          );
++        }
++
++        await client.query("COMMIT");
++      } catch (err) {
++        await client.query("ROLLBACK");
++        throw err;
++      } finally {
++        client.release();
++      }
++    }
++    return NextResponse.json({ status: "ok", action: "refunded" });
++  }
++
++  // Неизвестное событие — логируем, отвечаем 200 (чтобы ЮKassa не ретраила)
++  console.log(`[webhook] Unhandled event type: ${eventType}`);
++  return NextResponse.json({ status: "ok", action: "ignored" });
+ }
+diff --git a/src/app/api/store/route.ts b/src/app/api/store/route.ts
+index bc8b402..9f493e4 100644
+--- a/src/app/api/store/route.ts
++++ b/src/app/api/store/route.ts
+@@ -23,7 +23,7 @@ import {
+   dbSendMessage, dbGetMessages, dbGetChatList, dbMarkMessagesRead,
+   dbGetEmailNotificationPref, dbSetEmailNotificationPref,
+   dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
+-  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats,
++  dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats, dbInitPromoPayment,
+   dbExpirePromotions,
+   dbGetMyPromotions, dbIncrementPromoStats,
+   dbCreateEmailVerificationCode, dbVerifyEmail,
+@@ -57,6 +57,7 @@ const OWNER_PARAM: Record<string, string> = {
+   addListing: "hostId",
+   applyListingPromo: "hostId",
+   addPendingEdit: "hostId",
++  initPromoPayment:  "hostId",
+   addBooking: "guestId",
+   addReview: "guestId",
+   updateListing: "hostId",
+@@ -560,6 +561,21 @@ export async function POST(req: NextRequest) {
+         const pm = await dbCreatePromotion(params);
+         return NextResponse.json({ ok: true, data: pm });
+       }
++      case "initPromoPayment": {
++        // Создаёт или возвращает существующую запись promotions (status=draft/pending).
++        // После этого клиент вызывает /api/payments/create с полученным promotion_id
++        // и получает paymentUrl для редиректа на ЮKassa.
++        const promo = await dbInitPromoPayment({
++          listing_id:    params.listingId,
++          host_id:       params.hostId,
++          host_name:     params.hostName ?? "",
++          listing_title: params.listingTitle ?? "",
++          promo_type:    params.promoType,
++          duration_days: params.durationDays ?? 7,
++          price:         params.price ?? 0,
++        });
++        return NextResponse.json({ ok: true, data: promo });
++      }
+       case "getPromoStats": {
+         const stats = await dbGetPromoStats();
+         return NextResponse.json({ ok: true, data: stats });
+diff --git a/src/app/dashboard/host/page.tsx b/src/app/dashboard/host/page.tsx
+index 5c4b867..daecb28 100644
+--- a/src/app/dashboard/host/page.tsx
++++ b/src/app/dashboard/host/page.tsx
+@@ -94,11 +94,6 @@ export default function HostDashboard() {
+   const handleBookingAction = (bid: string, action: "confirm" | "reject") =>
+     store.updateBookingStatus(bid, action === "confirm" ? "confirmed" : "rejected");
+ 
+-  const handlePromoApply = (type: PromoType) => {
+-    if (!promoListing) return;
+-    store.updateListingPromo(promoListing.id, type);
+-  };
+-
+   const PROMO_STYLE: Record<string, string> = {
+     top: "bg-amber-500 text-white",
+     highlight: "bg-violet-500 text-white",
+@@ -344,7 +339,7 @@ export default function HostDashboard() {
+           <PromoteModal
+             listingId={promoListing.id} listingTitle={promoListing.title}
+             open={!!promoListing} onOpenChange={(v) => { if (!v) setPromoListing(null); }}
+-            onApply={handlePromoApply} currentPromo={promoListing.promo}
++            currentPromo={promoListing.promo}
+           />
+         )}
+       </main>
+diff --git a/src/app/dashboard/page.tsx b/src/app/dashboard/page.tsx
+index f09160f..3ec876e 100644
+--- a/src/app/dashboard/page.tsx
++++ b/src/app/dashboard/page.tsx
+@@ -214,11 +214,6 @@ export default function UnifiedDashboard() {
+   const handleBookingAction = (bid: string, action: "confirm" | "reject") =>
+     store.updateBookingStatus(bid, action === "confirm" ? "confirmed" : "rejected");
+ 
+-  const handlePromoApply = (type: PromoType) => {
+-    if (!promoListing) return;
+-    store.updateListingPromo(promoListing.id, type);
+-  };
+-
+   const promoClasses = (promo: string | null) => {
+     if (!promo) return "";
+     return promo === "top" ? "ring-2 ring-amber-500/50" : "ring-2 ring-violet-500/50";
+@@ -827,7 +822,7 @@ export default function UnifiedDashboard() {
+           <PromoteModal
+             listingId={promoListing.id} listingTitle={promoListing.title}
+             open={!!promoListing} onOpenChange={(v) => { if (!v) setPromoListing(null); }}
+-            onApply={handlePromoApply} currentPromo={promoListing.promo}
++            currentPromo={promoListing.promo}
+           />
+         )}
+       </main>
+diff --git a/src/components/promote-modal.tsx b/src/components/promote-modal.tsx
+index 25284e7..6511867 100644
+--- a/src/components/promote-modal.tsx
++++ b/src/components/promote-modal.tsx
+@@ -12,98 +12,117 @@ import {
+ } from "@/components/ui/select";
+ import { Label } from "@/components/ui/label";
+ import {
+-  Flame, TrendingUp, Palette, Check, Zap, Clock, Star,
++  Flame, TrendingUp, Palette, Check, Zap, Star, Loader2,
+ } from "lucide-react";
++import { apiInitPromoPayment, apiCreatePayment } from "@/lib/api";
++import { useStore } from "@/lib/store";
+ 
+ type PromoType = "top" | "urgent" | "highlight";
+ 
+-// ── Duration options shared across all promo types ──
+ const DURATIONS = [
+-  { value: "7", label: "7 дней", multiplier: 1 },
++  { value: "7",  label: "7 дней",  multiplier: 1   },
+   { value: "14", label: "14 дней", multiplier: 1.8 },
+   { value: "21", label: "21 день", multiplier: 2.5 },
+   { value: "30", label: "30 дней", multiplier: 3.2 },
+ ] as const;
+ 
+ const PROMO_OFFERS: {
+-  type: PromoType;
+-  label: string;
+-  desc: string;
+-  icon: typeof Flame;
+-  basePrice: number;
+-  color: string;
++  type: PromoType; label: string; desc: string;
++  icon: typeof Flame; basePrice: number; color: string;
+ }[] = [
+   {
+-    type: "top",
+-    label: "В ТОП",
+-    desc: "Объявление закрепляется первым в каталоге и на главной. Выбирайте срок — чем дольше, тем выгоднее.",
+-    icon: TrendingUp,
++    type:      "top",
++    label:     "В ТОП",
++    desc:      "Объявление закрепляется первым в каталоге и на главной. Выбирайте срок — чем дольше, тем выгоднее.",
++    icon:      TrendingUp,
+     basePrice: 2990,
+-    color: "bg-gradient-to-r from-amber-500 to-orange-500",
++    color:     "bg-gradient-to-r from-amber-500 to-orange-500",
+   },
+   {
+-    type: "urgent",
+-    label: "Срочно",
+-    desc: "Объявление получает метку срочности и поднимается в поиске. Для горящих дат и последних мест.",
+-    icon: Flame,
++    type:      "urgent",
++    label:     "Срочно",
++    desc:      "Объявление получает метку срочности и поднимается в поиске. Для горящих дат и последних мест.",
++    icon:      Flame,
+     basePrice: 990,
+-    color: "bg-gradient-to-r from-red-500 to-rose-500",
++    color:     "bg-gradient-to-r from-red-500 to-rose-500",
+   },
+   {
+-    type: "highlight",
+-    label: "Выделение цветом",
+-    desc: "Объявление выделяется яркой рамкой и привлекает взгляд в результатах поиска и каталоге.",
+-    icon: Palette,
++    type:      "highlight",
++    label:     "Выделение цветом",
++    desc:      "Объявление выделяется яркой рамкой и привлекает взгляд в результатах поиска и каталоге.",
++    icon:      Palette,
+     basePrice: 1490,
+-    color: "bg-gradient-to-r from-violet-500 to-purple-500",
++    color:     "bg-gradient-to-r from-violet-500 to-purple-500",
+   },
+ ];
+ 
+ interface Props {
+-  listingId: string;
++  listingId:    string;
+   listingTitle: string;
+-  open: boolean;
++  open:         boolean;
+   onOpenChange: (v: boolean) => void;
+-  onApply: (type: PromoType) => void;
+   currentPromo: PromoType | null;
+ }
+ 
+ export function PromoteModal({
+-  listingId,
+-  listingTitle,
+-  open,
+-  onOpenChange,
+-  onApply,
+-  currentPromo,
++  listingId, listingTitle, open, onOpenChange, currentPromo,
+ }: Props) {
++  const user = useStore((s: any) => s.user);
++
+   const [selected, setSelected] = useState<PromoType | null>(null);
+-  const [duration, setDuration] = useState("7");
+-  const [success, setSuccess] = useState(false);
++  const [duration, setDuration]  = useState("7");
++  const [loading, setLoading]    = useState(false);
++  const [error, setError]        = useState<string | null>(null);
+ 
+   const calcPrice = (base: number, dur: string) => {
+     const d = DURATIONS.find((x) => x.value === dur);
+     return Math.round(base * (d?.multiplier ?? 1));
+   };
+ 
+-  const handleApply = () => {
+-    if (!selected) return;
+-    setSuccess(true);
+-    onApply(selected);
+-    setTimeout(() => {
+-      setSuccess(false);
+-      setSelected(null);
+-    }, 2000);
++  const handlePay = async () => {
++    if (!selected || !user) return;
++    setError(null);
++    setLoading(true);
++
++    const offer = PROMO_OFFERS.find((o) => o.type === selected)!;
++    const price = calcPrice(offer.basePrice, duration);
++
++    try {
++      // Шаг 1: создаём / получаем запись promotions
++      const initResult: any = await apiInitPromoPayment({
++        listingId,
++        hostId:       user.id,
++        hostName:     user.name ?? "",
++        listingTitle,
++        promoType:    selected,
++        durationDays: parseInt(duration, 10),
++        price,
++      });
++
++      if (!initResult?.ok) throw new Error(initResult?.error ?? "Не удалось создать промо");
++      const promotionId: string = initResult.data.id;
++
++      // Шаг 2: создаём платёж в ЮKassa, получаем paymentUrl
++      const { paymentUrl } = await apiCreatePayment(promotionId);
++
++      // Редиректим хоста на страницу оплаты ЮKassa
++      window.location.href = paymentUrl;
++    } catch (err: any) {
++      setError(err?.message ?? "Ошибка. Попробуйте ещё раз.");
++      setLoading(false);
++    }
+   };
+ 
+   const handleClose = () => {
++    if (loading) return; // не закрываем, пока идёт запрос
+     setSelected(null);
+     setDuration("7");
+-    setSuccess(false);
++    setError(null);
+     onOpenChange(false);
+   };
+ 
+   const selectedOffer = PROMO_OFFERS.find((o) => o.type === selected);
+-  const finalPrice = selectedOffer ? calcPrice(selectedOffer.basePrice, duration) : 0;
++  const finalPrice    = selectedOffer ? calcPrice(selectedOffer.basePrice, duration) : 0;
+ 
+   return (
+     <Dialog open={open} onOpenChange={handleClose}>
+@@ -112,11 +131,9 @@ export function PromoteModal({
+           <DialogTitle className="font-display text-2xl">Продвижение объявления</DialogTitle>
+         </DialogHeader>
+ 
+-        <p className="text-sm text-muted-foreground -mt-2">
+-          «{listingTitle}»
+-        </p>
++        <p className="text-sm text-muted-foreground -mt-2">«{listingTitle}»</p>
+ 
+-        {currentPromo && !success && (
++        {currentPromo && (
+           <div className="flex items-center gap-2 p-3 bg-accent/5 border border-accent/20 rounded-lg text-sm">
+             <Zap className="w-4 h-4 text-accent shrink-0" />
+             <span className="text-muted-foreground">
+@@ -125,125 +142,120 @@ export function PromoteModal({
+           </div>
+         )}
+ 
+-        {success ? (
+-          <div className="text-center py-8 space-y-3">
+-            <div className="w-16 h-16 mx-auto bg-green-100 rounded-full flex items-center justify-center">
+-              <Check className="w-8 h-8 text-green-600" />
+-            </div>
+-            <h3 className="font-display text-xl">Оплата прошла успешно!</h3>
+-            <p className="text-sm text-muted-foreground">
+-              {selectedOffer?.label} на {DURATIONS.find((d) => d.value === duration)?.label} активировано.
+-            </p>
+-            <Button variant="outline" onClick={handleClose}>Закрыть</Button>
+-          </div>
+-        ) : (
+-          <div className="space-y-4 pt-2">
+-            {PROMO_OFFERS.map((offer) => {
+-              const isCurrent = currentPromo === offer.type;
+-              const isSelected = selected === offer.type;
+-              const offerPrice = calcPrice(offer.basePrice, duration);
+-              const bestDeal = duration === "30" ? Math.round(offer.basePrice * 30 / 7) - offer.basePrice * DURATIONS[3].multiplier : null;
+-
+-              return (
+-                <button
+-                  key={offer.type}
+-                  onClick={() => { setSelected(offer.type); setDuration("7"); }}
+-                  className={`w-full text-left p-4 border-2 rounded-xl transition-all ${
+-                    isSelected
+-                      ? "border-accent bg-accent/5 ring-1 ring-accent"
+-                      : isCurrent
+-                      ? "border-accent/30 bg-accent/5"
+-                      : "border-border hover:border-muted-foreground"
+-                  }`}
+-                >
+-                  <div className="flex items-start gap-4">
+-                    <div className={`w-10 h-10 ${offer.color} rounded-lg flex items-center justify-center shrink-0`}>
+-                      <offer.icon className="w-5 h-5 text-white" />
+-                    </div>
+-                    <div className="flex-1 min-w-0">
+-                      <div className="flex items-center gap-2 flex-wrap">
+-                        <span className="font-medium text-sm">{offer.label}</span>
+-                        {isCurrent && (
+-                          <Badge className="text-xs bg-accent text-accent-fg">Активно</Badge>
+-                        )}
+-                      </div>
+-                      <p className="text-xs text-muted-foreground mt-1">{offer.desc}</p>
+-                    </div>
+-                    <div className="text-right shrink-0">
+-                      <div className="font-display text-lg">{offer.basePrice.toLocaleString("ru-RU")} ₽</div>
+-                      <span className="text-xs text-muted-foreground">за 7 дн.</span>
++        <div className="space-y-4 pt-2">
++          {PROMO_OFFERS.map((offer) => {
++            const isCurrent  = currentPromo === offer.type;
++            const isSelected = selected === offer.type;
++
++            return (
++              <button
++                key={offer.type}
++                onClick={() => { setSelected(offer.type); setDuration("7"); setError(null); }}
++                disabled={loading}
++                className={`w-full text-left p-4 border-2 rounded-xl transition-all disabled:opacity-50 ${
++                  isSelected
++                    ? "border-accent bg-accent/5 ring-1 ring-accent"
++                    : isCurrent
++                    ? "border-accent/30 bg-accent/5"
++                    : "border-border hover:border-muted-foreground"
++                }`}
++              >
++                <div className="flex items-start gap-4">
++                  <div className={`w-10 h-10 ${offer.color} rounded-lg flex items-center justify-center shrink-0`}>
++                    <offer.icon className="w-5 h-5 text-white" />
++                  </div>
++                  <div className="flex-1 min-w-0">
++                    <div className="flex items-center gap-2 flex-wrap">
++                      <span className="font-medium text-sm">{offer.label}</span>
++                      {isCurrent && (
++                        <Badge className="text-xs bg-accent text-accent-fg">Активно</Badge>
++                      )}
+                     </div>
++                    <p className="text-xs text-muted-foreground mt-1">{offer.desc}</p>
++                  </div>
++                  <div className="text-right shrink-0">
++                    <div className="font-display text-lg">{offer.basePrice.toLocaleString("ru-RU")} ₽</div>
++                    <span className="text-xs text-muted-foreground">за 7 дн.</span>
+                   </div>
+-                </button>
+-              );
+-            })}
+-
+-            {/* Duration selector — only visible when a type is selected */}
+-            {selected && (
+-              <div className="bg-muted/30 border rounded-xl p-4 space-y-3">
+-                <div className="space-y-1.5">
+-                  <Label className="text-sm">Срок размещения</Label>
+-                  <Select value={duration} onValueChange={(v) => setDuration(v ?? "7")}>
+-                    <SelectTrigger className="w-full">
+-                      <SelectValue />
+-                    </SelectTrigger>
+-                    <SelectContent>
+-                      {DURATIONS.map((d) => {
+-                        const p = selectedOffer ? calcPrice(selectedOffer.basePrice, d.value) : 0;
+-                        const savings = d.value !== "7" ? Math.round(selectedOffer!.basePrice * 7 * parseInt(d.value) / 7 - p) : 0;
+-                        return (
+-                          <SelectItem key={d.value} value={d.value}>
+-                            <span className="flex items-center justify-between w-full gap-4">
+-                              <span>{d.label}</span>
+-                              <span className="font-mono text-xs">
+-                                {p.toLocaleString("ru-RU")} ₽
+-                                {savings > 0 && (
+-                                  <span className="text-green-600 ml-2">(−{savings.toLocaleString("ru-RU")} ₽)</span>
+-                                )}
+-                              </span>
+-                            </span>
+-                          </SelectItem>
+-                        );
+-                      })}
+-                    </SelectContent>
+-                  </Select>
+                 </div>
++              </button>
++            );
++          })}
+ 
+-                {duration !== "7" && (
+-                  <div className="flex items-center gap-1.5 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
+-                    <Star className="w-3.5 h-3.5 shrink-0" />
+-                    <span>
+-                      Экономия {Math.round(selectedOffer!.basePrice * parseInt(duration) - finalPrice).toLocaleString("ru-RU")} ₽
+-                      по сравнению с оплатой понедельно
+-                    </span>
+-                  </div>
+-                )}
++          {selected && (
++            <div className="bg-muted/30 border rounded-xl p-4 space-y-3">
++              <div className="space-y-1.5">
++                <Label className="text-sm">Срок размещения</Label>
++                <Select value={duration} onValueChange={(v) => setDuration(v ?? "7")} disabled={loading}>
++                  <SelectTrigger className="w-full">
++                    <SelectValue />
++                  </SelectTrigger>
++                  <SelectContent>
++                    {DURATIONS.map((d) => {
++                      const p = selectedOffer ? calcPrice(selectedOffer.basePrice, d.value) : 0;
++                      const savings = d.value !== "7"
++                        ? Math.round(selectedOffer!.basePrice * parseInt(d.value) - p)
++                        : 0;
++                      return (
++                        <SelectItem key={d.value} value={d.value}>
++                          <span className="flex items-center justify-between w-full gap-4">
++                            <span>{d.label}</span>
++                            <span className="font-mono text-xs">
++                              {p.toLocaleString("ru-RU")} ₽
++                              {savings > 0 && (
++                                <span className="text-green-600 ml-2">(−{savings.toLocaleString("ru-RU")} ₽)</span>
++                              )}
++                            </span>
++                          </span>
++                        </SelectItem>
++                      );
++                    })}
++                  </SelectContent>
++                </Select>
+               </div>
+-            )}
+ 
+-            <Separator />
+-
+-            <div className="flex items-center justify-between text-sm">
+-              <span className="text-muted-foreground">Итого к оплате</span>
+-              <span className="font-display text-xl">
+-                {selected ? `${finalPrice.toLocaleString("ru-RU")} ₽` : "—"}
+-              </span>
++              {duration !== "7" && (
++                <div className="flex items-center gap-1.5 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">
++                  <Star className="w-3.5 h-3.5 shrink-0" />
++                  <span>
++                    Экономия {Math.round(selectedOffer!.basePrice * parseInt(duration) - finalPrice).toLocaleString("ru-RU")} ₽
++                    по сравнению с оплатой понедельно
++                  </span>
++                </div>
++              )}
+             </div>
++          )}
++
++          {error && (
++            <p className="text-sm text-destructive text-center">{error}</p>
++          )}
+ 
+-            <Button
+-              className="w-full"
+-              size="lg"
+-              disabled={!selected}
+-              onClick={handleApply}
+-            >
+-              Оплатить и активировать
+-            </Button>
+-
+-            <p className="text-xs text-center text-muted-foreground">
+-              Оплата через T-Bank / Yookassa. Активация — моментально после подтверждения.
+-            </p>
++          <Separator />
++
++          <div className="flex items-center justify-between text-sm">
++            <span className="text-muted-foreground">Итого к оплате</span>
++            <span className="font-display text-xl">
++              {selected ? `${finalPrice.toLocaleString("ru-RU")} ₽` : "—"}
++            </span>
+           </div>
+-        )}
++
++          <Button
++            className="w-full"
++            size="lg"
++            disabled={!selected || loading}
++            onClick={handlePay}
++          >
++            {loading ? (
++              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Переходим к оплате…</>
++            ) : (
++              "Оплатить через ЮKassa"
++            )}
++          </Button>
++
++          <p className="text-xs text-center text-muted-foreground">
++            Безопасная оплата через ЮKassa. Активация — моментально после подтверждения платежа.
++          </p>
++        </div>
+       </DialogContent>
+     </Dialog>
+   );
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index a5f219e..db22355 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -62,6 +62,26 @@ export const apiAddListing = (params: Record<string, unknown>) => call("addListi
+ export const apiApplyListingPromo = (hostId: string, id: string, promo: string, duration: number = 7) =>
+   call("applyListingPromo", { hostId, id, promo, duration });
+ 
++// ── Payments (ЮKassa) ──
++
++/** Шаг 1: создаёт/возвращает запись promotions (status=draft) — перед переходом к оплате. */
++export const apiInitPromoPayment = (params: {
++  listingId: string; hostId: string; hostName: string; listingTitle: string;
++  promoType: "top" | "urgent" | "highlight"; durationDays: number; price: number;
++}) => call("initPromoPayment", params);
++
++/** Шаг 2: создаёт платёж в ЮKassa, возвращает paymentUrl для редиректа хоста. */
++export const apiCreatePayment = async (promotionId: string): Promise<{ paymentUrl: string }> => {
++  const res = await fetch("/api/payments/create", {
++    method:  "POST",
++    headers: { "Content-Type": "application/json" },
++    body:    JSON.stringify({ promotionId }),
++  });
++  const data = await res.json();
++  if (!data.ok) throw new Error(data.error ?? "Ошибка создания платежа");
++  return data.data;
++};
++
+ export const apiUpdateListing = (id: string, hostId: string, patch: Record<string, unknown>, images?: string[]) =>
+   call("updateListing", { id, hostId, patch, images });
+ export const apiApproveListing = (id: string) => call("approveListing", { id });
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 7e1c755..0bbbbcf 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -1198,12 +1198,39 @@ export async function dbCreatePromotion(data: {
+ }) {
+   const { rows } = await pool.query(
+     `INSERT INTO promotions (listing_id, host_id, host_name, listing_title, promo_type, duration_days, price, status)
+-     VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING *`,
++     VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING *`,
+     [data.listing_id, data.host_id, data.host_name, data.listing_title, data.promo_type, data.duration_days, data.price]
+   );
+   return rows[0];
+ }
+ 
++/**
++ * Подготавливает запись продвижения к оплате.
++ * Если для этого объявления уже есть незавершённый платёж — возвращает его.
++ * Вызывается перед редиректом на ЮKassa; сам платёж создаётся в /api/payments/create.
++ */
++export async function dbInitPromoPayment(data: {
++  listing_id: string; host_id: string; host_name: string; listing_title: string;
++  promo_type: "top" | "urgent" | "highlight"; duration_days: number; price: number;
++}) {
++  // Повторно используем незавершённую запись, если она есть (status=draft|pending)
++  const { rows: existing } = await pool.query(
++    `SELECT id, payment_url FROM promotions
++     WHERE listing_id = $1 AND host_id = $2 AND promo_type = $3 AND status IN ('draft','pending')
++     ORDER BY created_at DESC LIMIT 1`,
++    [data.listing_id, data.host_id, data.promo_type]
++  );
++  if (existing[0]) return existing[0];
++
++  const { rows } = await pool.query(
++    `INSERT INTO promotions (listing_id, host_id, host_name, listing_title, promo_type, duration_days, price, status)
++     VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING id`,
++    [data.listing_id, data.host_id, data.host_name, data.listing_title,
++     data.promo_type, data.duration_days, data.price]
++  );
++  return rows[0];
++}
++
+ export async function dbIncrementPromoStats(listingId: string, field: "impressions" | "clicks" | "contacts" | "bookings_from_promo") {
+   await pool.query(
+     `UPDATE promotions SET ${field} = COALESCE(${field}, 0) + 1 WHERE listing_id = $1 AND status = 'active'`,
