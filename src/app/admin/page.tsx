@@ -376,7 +376,6 @@ export default function AdminPage() {
   const handleChangeRole = async () => {
     if (!roleUserId) return;
     try {
-      const { apiUpdateProfile } = await import("@/lib/api");
       await apiUpdateProfile(roleUserId, { role: roleValue });
     } catch (e) {
       console.error("Role update failed:", e);
@@ -387,7 +386,6 @@ export default function AdminPage() {
 
   const handleBan = async (id: string) => {
     try {
-      const { apiUpdateProfile } = await import("@/lib/api");
       await apiUpdateProfile(id, { role: "banned" });
     } catch (e) {
       console.error("Ban failed:", e);
@@ -945,7 +943,6 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
                                   className="h-8 text-xs text-green-600 hover:text-green-700"
                                   onClick={async () => {
                                     try {
-                                      const { apiUpdateProfile } = await import("@/lib/api");
                                       await apiUpdateProfile(u.id, { role: "user" });
                                     } catch (e) {}
                                     loadUsers();
