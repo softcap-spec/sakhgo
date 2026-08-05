@@ -1257,34 +1257,6 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
               <Label>Телефон</Label>
               <Input value={editUserPhone} onChange={(e) => setEditUserPhone(e.target.value)} placeholder="+79990000000" />
             </div>
-            <div className="space-y-2">
-              <Label>Роль</Label>
-              <Select value={editUserRole} onValueChange={(v) => setEditUserRole(v ?? "")}>
-                <SelectTrigger><SelectValue>{ROLE_LABELS[editUserRole] ?? editUserRole}</SelectValue></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="traveler">Путешественник</SelectItem>
-                  <SelectItem value="host">Организатор / Собственник</SelectItem>
-                  <SelectItem value="vendor">Продавец (vendor)</SelectItem>
-                  <SelectItem value="admin">Администратор (admin)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="text-sm">Верифицирован</Label>
-              <button
-                type="button"
-                onClick={() => setEditUserVerified(!editUserVerified)}
-                className={cn(
-                  "w-9 h-5 rounded-full transition-colors relative",
-                  editUserVerified ? "bg-success" : "bg-muted"
-                )}
-              >
-                <span className={cn(
-                  "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform",
-                  editUserVerified ? "left-4" : "left-0.5"
-                )} />
-              </button>
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditUserId(null)}>Отмена</Button>
