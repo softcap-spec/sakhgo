@@ -4,7 +4,6 @@ import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { ReactQueryProvider } from "@/components/react-query-provider";
-import { AdToasts } from "@/components/ad-toasts";
 import { ChatFAB } from "@/components/chat-fab";
 
 const displayFont = Cormorant_Garamond({
@@ -27,7 +26,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Providers>
             <div className="flex-1 flex flex-col">
               {children}
-              <AdToasts />
               <ChatFAB />
             </div>
           </Providers>
