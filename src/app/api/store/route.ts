@@ -4,7 +4,7 @@ import { sendTgNotification, isTgConfigured } from "@/lib/notify";
 import { getSession, createSession, clearSession } from "@/lib/session";
 import { sanitizeUser } from "@/lib/db";
 import {
-  dbGetAdminStats, dbSearchProfiles, dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
+  dbGetAdminStats, dbSearchProfiles, dbUpdateUserRole, dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
   dbChangePassword,
   dbVerifyPhone, dbGenerateVerificationCode,
   dbGetPublicListings, dbGetPublicListingsCount, dbGetListingById, dbGetListingByIdAdmin, dbGetHostListingById,
@@ -34,7 +34,7 @@ export const dynamic = "force-dynamic";
 
 // Actions that require an authenticated admin session.
 const ADMIN_ONLY = new Set([
-  "getAllProfiles", "getAllListings", "getListingByIdAdmin", "adminUpdateListing", "approveListing",
+  "getAllProfiles", "getAllListings", "getListingByIdAdmin", "adminUpdateListing", "approveListing", "updateUserRole",
   "moderateReview", "getPendingReviews", "updatePromoPricing", "updatePromotionStatus",
   "getAllPromotions", "getPromoStats", "expirePromotions", "createPromotion",
   "getAdminNotifications", "getUnreadCount", "markNotificationRead", "markAllNotificationsRead",
@@ -148,12 +148,12 @@ export async function POST(req: NextRequest) {
       // Password reset
       case "forgotPassword": {
         const resetEntry = await dbCreatePasswordResetToken(params.email);
-        if (!resetEntry) {
-          return NextResponse.json({ ok: false, error: "Если email зарегистрирован, ссылка отправлена." });
+        if (resetEntry) {
+          const resetUrl = `${process.env.NEXT_PUBLIC_SITE_URL || "https://sakhgo.ru"}/reset-password?token=${resetEntry.token}`;
+          const { sendPasswordResetEmail } = await import("@/lib/email");
+          await sendPasswordResetEmail(resetEntry.email, resetEntry.name, resetUrl);
         }
-        const { sendPasswordResetEmail } = await import("@/lib/email");
-        await sendPasswordResetEmail(resetEntry.email, resetEntry.name, "/reset-password?token=" + resetEntry.token);
-        return NextResponse.json({ ok: true, message: "Ссылка для сброса пароля отправлена на email" });
+        return NextResponse.json({ ok: true, message: "Если email зарегистрирован, ссылка отправлена." });
       }
       case "verifyEmail": {
         if (!params.token) {
@@ -377,6 +377,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, data: booking });
       }
       case "updateBookingStatus": {
+        const { rows: [booking] } = await pool.query(
+          "SELECT host_id, guest_id FROM bookings WHERE id = $1", [params.id]
+        );
+        if (!booking) return NextResponse.json({ ok: false, error: "Booking not found" }, { status: 404 });
+        if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+        const isHost = session.userId === booking.host_id;
+        const isGuest = session.userId === booking.guest_id;
+        // host can confirm/reject, guest can cancel, both can do what host can do for flexibility
+        const hostStatuses = new Set(["confirmed", "rejected", "cancelled"]);
+        const guestStatuses = new Set(["cancelled"]);
+        if (isGuest && !guestStatuses.has(params.status)) {
+          return NextResponse.json({ ok: false, error: "Only the host can set this status" }, { status: 403 });
+        }
+        if (!isHost && !isGuest && session.role !== "admin") {
+          return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+        }
         await dbUpdateBookingStatus(params.id, params.status);
         return NextResponse.json({ ok: true });
       }
@@ -427,6 +443,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+
+
+      case "updateUserRole": {
+        const updated = await dbUpdateUserRole(params.id, params.role);
+        if (!updated) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+        return NextResponse.json({ ok: true, data: updated });
+      }
 
       case "searchProfiles": {
         const { search, page = 1, pageSize = 15 } = params;

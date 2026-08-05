@@ -99,6 +99,9 @@ export const apiChangePassword = (id: string, currentPassword: string, newPasswo
 export const apiSearchProfiles = (search?: string, page?: number, pageSize?: number) =>
   call("searchProfiles", { search, page, pageSize });
 
+export const apiUpdateUserRole = (id: string, role: string) =>
+  call("updateUserRole", { id, role });
+
 export const apiGetAllProfiles = () => call("getAllProfiles");
 export const apiGetAdminStats = () => call("getAdminStats");
 export const apiGetAllListings = () => call("getAllListings");

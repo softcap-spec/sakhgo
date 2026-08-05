@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useStore, Banner } from "@/lib/store";
 import { UserRole } from "@/lib/types";
-import { apiUpdateProfile } from "@/lib/api";
+import { apiUpdateProfile, apiUpdateUserRole } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { Header } from "@/components/header";
 import { AuthModal } from "@/components/auth-modal";
@@ -376,7 +376,7 @@ export default function AdminPage() {
   const handleChangeRole = async () => {
     if (!roleUserId) return;
     try {
-      await apiUpdateProfile(roleUserId, { role: roleValue });
+      await apiUpdateUserRole(roleUserId, roleValue);
     } catch (e) {
       console.error("Role update failed:", e);
     }
@@ -386,7 +386,7 @@ export default function AdminPage() {
 
   const handleBan = async (id: string) => {
     try {
-      await apiUpdateProfile(id, { role: "banned" });
+      await apiUpdateUserRole(id, "banned");
     } catch (e) {
       console.error("Ban failed:", e);
     }
@@ -943,7 +943,7 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
                                   className="h-8 text-xs text-green-600 hover:text-green-700"
                                   onClick={async () => {
                                     try {
-                                      await apiUpdateProfile(u.id, { role: "user" });
+                                      await apiUpdateUserRole(u.id, "user");
                                     } catch (e) {}
                                     loadUsers();
                                   }}

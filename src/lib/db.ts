@@ -167,14 +167,25 @@ export async function dbGenerateVerificationCode(email: string) {
   return { ok: true, code };
 }
 
-export async function dbUpdateProfile(id: string, data: Record<string, unknown>) {
-  const keys = Object.keys(data);
+const SELF_EDITABLE_COLUMNS = new Set(["name", "phone", "avatar_url", "bio"]);
+
+export async function dbUpdateProfile(id: string, data: Record<string, unknown>, isAdmin: boolean = false) {
+  const allowed = isAdmin ? null : SELF_EDITABLE_COLUMNS;
+  const keys = Object.keys(data).filter((k) => (!allowed || allowed.has(k)));
   if (keys.length === 0) return null;
   const setClauses = keys.map((k, i) => `${k} = $${i + 2}`);
   const values = keys.map((k) => data[k]);
   const { rows } = await pool.query(
     `UPDATE profiles SET ${setClauses.join(", ")}, updated_at = now() WHERE id = $1 RETURNING *`,
     [id, ...values]
+  );
+  return rows[0];
+}
+
+export async function dbUpdateUserRole(id: string, role: string) {
+  const { rows } = await pool.query(
+    "UPDATE profiles SET role = $2, updated_at = now() WHERE id = $1 RETURNING *",
+    [id, role]
   );
   return rows[0];
 }
@@ -209,8 +220,15 @@ export async function dbGetAllListings() {
 }
 
 /** Admin: update any listing directly */
+const ADMIN_LISTING_EDITABLE_COLUMNS = new Set([
+  "title", "description", "price", "location", "amenities", "images",
+  "phone", "email", "website", "max_guests", "min_days",
+  "latitude", "longitude", "photos", "amenities_list",
+  "verified", "active", "promo", "promo_expires_at", "promo_type", "host_id"
+]);
+
 export async function dbAdminUpdateListing(id: string, data: Record<string, unknown>) {
-  const keys = Object.keys(data);
+  const keys = Object.keys(data).filter(k => ADMIN_LISTING_EDITABLE_COLUMNS.has(k));
   if (keys.length === 0) return null;
   const setClauses = keys.map((k, i) => `${k} = $${i + 2}`);
   const values = keys.map((k) => data[k]);
@@ -515,13 +533,20 @@ export async function dbAddListing(data: {
 }
 
 /** Host: update listing (sets verified=false, triggers re-moderation) */
+const LISTING_SELF_EDITABLE_COLUMNS = new Set([
+  "title", "description", "price", "location", "amenities", "images",
+  "phone", "email", "website", "max_guests", "min_days",
+  "latitude", "longitude", "photos", "amenities_list"
+]);
+
 export async function dbUpdateListing(id: string, hostId: string, patch: Record<string, unknown>) {
-  const keys = Object.keys(patch);
+  const rawKeys = Object.keys(patch);
+  const keys = rawKeys.filter(k => LISTING_SELF_EDITABLE_COLUMNS.has(k));
   if (keys.length === 0) return;
-  // Only reset verified if content changed (not just promo)
-  const isPromoOnly = keys.length === 1 && keys[0] === "promo";
+  // Only reset verified if content changed
   const setClauses = [...keys.map((k, i) => `${k} = $${i + 3}`)];
-  if (!isPromoOnly) setClauses.push("verified = false");
+  // Reset verified if content changed
+  setClauses.push("verified = false");
   const values = keys.map((k) => patch[k]);
   await pool.query(
     `UPDATE listings SET ${setClauses.join(", ")}, updated_at = now()
@@ -640,6 +665,29 @@ export async function dbAddBooking(data: {
   checkIn: string; checkOut: string; guests: number; totalPrice: number;
   guestMessage?: string;
 }) {
+  // Fetch listing to verify price and check date overlap
+  const { rows: [listing] } = await pool.query(
+    "SELECT price, host_id FROM listings WHERE id = $1 AND active = true",
+    [data.listingId]
+  );
+  if (!listing) throw new Error("Listing not found or inactive");
+  
+  // Recalculate total price (ignoring client-supplied price)
+  const checkIn = new Date(data.checkIn);
+  const checkOut = new Date(data.checkOut);
+  const nights = Math.max(1, Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
+  const totalPrice = listing.price * nights;
+  
+  // Check for overlapping bookings
+  const { rows: overlaps } = await pool.query(
+    `SELECT id FROM bookings WHERE listing_id = $1 AND status != 'cancelled'
+     AND check_in < $2 AND check_out > $3`,
+    [data.listingId, data.checkOut, data.checkIn]
+  );
+  if (overlaps.length > 0) {
+    throw new Error("Dates are already booked");
+  }
+  
   const { rows } = await pool.query(
     `INSERT INTO bookings (listing_id, listing_title, listing_type, location,
             guest_id, guest_name, host_id, host_name, check_in, check_out,
@@ -647,9 +695,8 @@ export async function dbAddBooking(data: {
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
     [data.listingId, data.listingTitle, data.listingType, data.location,
      data.guestId, data.guestName, data.hostId, data.hostName,
-     data.checkIn, data.checkOut, data.guests, data.totalPrice, data.guestMessage ?? null]
+     data.checkIn, data.checkOut, data.guests, totalPrice, data.guestMessage ?? null]
   );
-  // Notify admin & host
   dbAddAdminNotification("new_booking", `Новая бронь: ${data.listingTitle} → ${data.guestName}`,
     `/dashboard`).catch(() => {});
   return rows[0];
