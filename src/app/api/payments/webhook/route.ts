@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
         `UPDATE promotions
          SET status    = 'active',
              paid_at   = now(),
-             starts_at = now(),
+             started_at = now(),
              expires_at = now() + (COALESCE(duration_days, 7) || ' days')::interval,
              price     = COALESCE(price, $3),
              updated_at = now()
