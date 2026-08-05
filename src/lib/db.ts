@@ -1206,6 +1206,50 @@ export async function dbGetMyPromotions(hostId: string) {
 }
 
 
+export interface ProfilesPage {
+  items: any[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export async function dbSearchProfiles(search: string, page: number, pageSize: number): Promise<ProfilesPage> {
+  const offset = (page - 1) * pageSize;
+  const like = `%${search}%`;
+  
+  const where = search
+    ? `WHERE p.name ILIKE $1 OR p.email ILIKE $1`
+    : "";
+  const params: any[] = search ? [like] : [];
+  const countParam = search ? [like] : [];
+  
+  const [{ rows: countRows }, { rows: items }] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int FROM profiles p ${where}`,
+      countParam
+    ),
+    pool.query(
+      `SELECT p.*,
+         (SELECT COUNT(*) FROM listings WHERE host_id = p.id)::int AS listings_count,
+         (SELECT COUNT(*) FROM bookings WHERE guest_id = p.id)::int AS bookings_count
+       FROM profiles p ${where}
+       ORDER BY p.created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset]
+    ),
+  ]);
+
+  const total = countRows[0]?.count ?? 0;
+  return {
+    items: items.map(sanitizeUser),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
+}
+
 export interface AdminStats {
   totalUsers: number;
   totalListings: number;

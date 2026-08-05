@@ -191,6 +191,10 @@ export default function AdminPage() {
   const [pending, setPending] = useState<typeof PENDING_LISTINGS>([]);
   const [users, setUsers] = useState<typeof USERS>([]);
   const [stats, setStats] = useState<any>(null);
+  const [userSearch, setUserSearch] = useState("");
+  const [userPage, setUserPage] = useState(1);
+  const [userTotal, setUserTotal] = useState(0);
+  const USER_PAGE_SIZE = 15;
 
   // If user is logged in as admin, load data
   useEffect(() => {
@@ -223,11 +227,11 @@ export default function AdminPage() {
       }).catch(() => {});
     });
 
-    // Users: load from DB (apiGetAllProfiles already returns json.data — the array)
-    import("@/lib/api").then(({ apiGetAllProfiles }) => {
-      apiGetAllProfiles().then((profiles: any[]) => {
-        if (Array.isArray(profiles)) {
-          const dbUsers = profiles.map((p: any) => ({
+    // Users: load with search + pagination
+    import("@/lib/api").then(({ apiSearchProfiles }) => {
+      apiSearchProfiles(userSearch, 1, USER_PAGE_SIZE).then((result: any) => {
+        if (result?.items) {
+          const dbUsers = result.items.map((p: any) => ({
             id: p.id,
             name: p.name,
             email: p.email,
@@ -239,6 +243,7 @@ export default function AdminPage() {
             phone: p.phone,
           }));
           setUsers(dbUsers);
+          setUserTotal(result.total);
         }
       });
     });
@@ -315,6 +320,31 @@ export default function AdminPage() {
   // Auth guard: block access entirely unless store.user.role === "admin"
   // No auto-login fallback — user must explicitly authenticate
 
+
+  const loadUsers = (search?: string, page?: number) => {
+    const s = search ?? userSearch;
+    const p = page ?? 1;
+    import("@/lib/api").then(({ apiSearchProfiles }) => {
+      apiSearchProfiles(s, p, USER_PAGE_SIZE).then((result: any) => {
+        if (result?.items) {
+          const dbUsers = result.items.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            email: p.email,
+            role: p.role,
+            verified: p.email_verified ?? false,
+            joined: p.created_at ? new Date(p.created_at).toLocaleDateString("ru-RU") : "—",
+            listings: p.listings_count ?? 0,
+            bookings: p.bookings_count ?? 0,
+            phone: p.phone,
+          }));
+          setUsers(dbUsers);
+          setUserTotal(result.total);
+        }
+      });
+    });
+  };
+
   const handleApprove = async (id: string) => {
     const localItem = pending.find(p => p.id === id);
     if (!localItem) return;
@@ -343,13 +373,25 @@ export default function AdminPage() {
     setRejectReason("");
   };
 
-  const handleChangeRole = () => {
+  const handleChangeRole = async () => {
     if (!roleUserId) return;
+    try {
+      const { apiUpdateProfile } = await import("@/lib/api");
+      await apiUpdateProfile(roleUserId, { role: roleValue });
+    } catch (e) {
+      console.error("Role update failed:", e);
+    }
     setUsers((u) => u.map((x) => (x.id === roleUserId ? { ...x, role: roleValue } : x)));
     setRoleUserId(null);
   };
 
-  const handleBan = (id: string) => {
+  const handleBan = async (id: string) => {
+    try {
+      const { apiUpdateProfile } = await import("@/lib/api");
+      await apiUpdateProfile(id, { role: "banned" });
+    } catch (e) {
+      console.error("Ban failed:", e);
+    }
     setUsers((u) => u.map((x) => (x.id === id ? { ...x, role: "banned" } : x)));
   };
 
@@ -375,22 +417,10 @@ export default function AdminPage() {
     } catch (e) {
       console.warn("updateProfile API failed:", e);
     }
-    // 2. Update local users list
-    setUsers((u) => u.map((x) =>
-      x.id === editUserId
-        ? { ...x, name: editUserName.trim(), email: editUserEmail.trim(), phone, role: editUserRole, verified: editUserVerified }
-        : x
-    ));
-    // 3. If editing self, also update store user
-    if (store.user?.id === editUserId) {
-      store.updateUser(editUserId, {
-        name: editUserName.trim(),
-        email: editUserEmail.trim(),
-        phone,
-        role: editUserRole as unknown as UserRole,
-      });
-    }
+    // 2. Reload from server (catches cascading changes)
+    loadUsers();
     setEditUserId(null);
+
   };
 
   const deleteUserName = users.find((u) => u.id === deleteUserId)?.name ?? "";
@@ -692,7 +722,7 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
             { id: "dashboard", label: "Дашборд", icon: BarChart3 },
             { id: "moderation", label: "Модерация", icon: Eye, count: pending.length },
             { id: "reviews", label: "Отзывы", icon: MessageSquare },
-            { id: "users", label: "Пользователи", icon: Users, count: users.length },
+            { id: "users", label: "Пользователи", icon: Users, count: userTotal },
             { id: "payments", label: "Платные услуги", icon: Banknote },
             { id: "categories", label: "Категории", icon: Tag, count: categories.length },
             { id: "banners", label: "Баннеры", icon: Megaphone },
@@ -781,7 +811,46 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
         {/* ── USERS ── */}
         {tab === "users" && (
           <div>
-            <h2 className="font-display text-2xl mb-6">Пользователи</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display text-2xl">Пользователи</h2>
+              <Badge variant="secondary" className="text-sm">{userTotal} всего</Badge>
+            </div>
+
+            {/* Search + pagination toolbar */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
+              <div className="relative w-full sm:w-72">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Поиск по имени или email..."
+                  value={userSearch}
+                  onChange={(e) => { setUserSearch(e.target.value); setUserPage(1); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") loadUsers(e.currentTarget.value, 1); }}
+                  className="pl-9"
+                />
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={userPage <= 1}
+                  onClick={() => { const p = userPage - 1; setUserPage(p); loadUsers(undefined, p); }}
+                >
+                  ← Назад
+                </Button>
+                <span className="min-w-[80px] text-center">
+                  {userTotal > 0 ? `${(userPage - 1) * USER_PAGE_SIZE + 1}–${Math.min(userPage * USER_PAGE_SIZE, userTotal)}` : "0"} из {userTotal}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={userPage * USER_PAGE_SIZE >= userTotal}
+                  onClick={() => { const p = userPage + 1; setUserPage(p); loadUsers(undefined, p); }}
+                >
+                  Вперёд →
+                </Button>
+              </div>
+            </div>
+
             <div className="bg-card border rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -797,79 +866,104 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
                     </tr>
                   </thead>
                   <tbody>
-                    {users.map((u) => (
-                      <tr key={u.id} className={cn("border-b hover:bg-muted/20 transition-colors", u.role === "banned" && "opacity-50")}>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="w-8 h-8">
-                              <AvatarFallback className="text-xs bg-accent text-accent-fg">{u.name[0]}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <div className="font-medium">{u.name}</div>
-                              <div className="text-xs text-muted-foreground">{u.email}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge className={cn(
-                            "text-xs font-semibold",
-                            u.role === "admin" && "bg-red-100 text-red-700",
-                            u.role === "host" && "bg-blue-100 text-blue-700",
-                            u.role === "vendor" && "bg-purple-100 text-purple-700",
-                            u.role === "traveler" && "bg-green-100 text-green-700",
-                            u.role === "banned" && "bg-gray-200 text-gray-500",
-                          )}>
-                            {u.role === "admin" ? "Админ" : u.role === "host" ? "Организатор" : u.role === "vendor" ? "Продавец" : u.role === "banned" ? "Заблокирован" : "Путешественник"}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-center hidden sm:table-cell">
-                          {u.verified ? <CheckCircle className="w-4 h-4 text-green-500 inline" /> : <XCircle className="w-4 h-4 text-muted inline" />}
-                        </td>
-                        <td className="px-4 py-3 text-center hidden md:table-cell">{u.listings}</td>
-                        <td className="px-4 py-3 text-center hidden md:table-cell">{u.bookings}</td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground hidden lg:table-cell">{u.joined}</td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 text-xs"
-                              onClick={() => openEditDialog(u)}
-                            >
-                              <Pencil className="w-3.5 h-3.5 mr-1" />Ред.
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 text-xs"
-                              onClick={() => { setRoleUserId(u.id); setRoleValue(u.role); }}
-                            >
-                              <UserCog className="w-3.5 h-3.5 mr-1" />Роль
-                            </Button>
-                            {u.role !== "banned" && u.role !== "admin" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs text-red-600 hover:text-red-700"
-                                onClick={() => handleBan(u.id)}
-                              >
-                                <Ban className="w-3.5 h-3.5 mr-1" />Блок
-                              </Button>
-                            )}
-                            {u.role !== "admin" && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs text-destructive hover:text-destructive"
-                                onClick={() => openDeleteDialog(u.id)}
-                              >
-                                <Trash2 className="w-3.5 h-3.5 mr-1" />Удалить
-                              </Button>
-                            )}
-                          </div>
+                    {users.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                          {userSearch ? "Ничего не найдено" : "Нет пользователей"}
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      users.map((u) => (
+                        <tr key={u.id} className={cn("border-b hover:bg-muted/20 transition-colors", u.role === "banned" && "opacity-50")}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="w-8 h-8">
+                                <AvatarFallback className="text-xs bg-accent text-accent-fg">{u.name[0]}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div className="font-medium">{u.name}</div>
+                                <div className="text-xs text-muted-foreground">{u.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge className={cn(
+                              "text-xs font-semibold",
+                              u.role === "admin" && "bg-red-100 text-red-700",
+                              u.role === "host" && "bg-blue-100 text-blue-700",
+                              u.role === "vendor" && "bg-purple-100 text-purple-700",
+                              u.role === "traveler" && "bg-green-100 text-green-700",
+                              u.role === "user" && "bg-green-100 text-green-700",
+                              u.role === "banned" && "bg-gray-200 text-gray-500",
+                            )}>
+                              {u.role === "admin" ? "Админ" : u.role === "host" ? "Организатор" : u.role === "vendor" ? "Продавец" : u.role === "banned" ? "Заблокирован" : "Пользователь"}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-center hidden sm:table-cell">
+                            {u.verified ? <CheckCircle className="w-4 h-4 text-green-500 inline" /> : <XCircle className="w-4 h-4 text-muted inline" />}
+                          </td>
+                          <td className="px-4 py-3 text-center hidden md:table-cell">{u.listings}</td>
+                          <td className="px-4 py-3 text-center hidden md:table-cell">{u.bookings}</td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground hidden lg:table-cell">{u.joined}</td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => openEditDialog(u)}
+                              >
+                                <Pencil className="w-3.5 h-3.5 mr-1" />Ред.
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => { setRoleUserId(u.id); setRoleValue(u.role); }}
+                              >
+                                <UserCog className="w-3.5 h-3.5 mr-1" />Роль
+                              </Button>
+                              {u.role !== "banned" && u.role !== "admin" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs text-red-600 hover:text-red-700"
+                                  onClick={() => handleBan(u.id)}
+                                >
+                                  <Ban className="w-3.5 h-3.5 mr-1" />Блок
+                                </Button>
+                              )}
+                              {u.role === "banned" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs text-green-600 hover:text-green-700"
+                                  onClick={async () => {
+                                    try {
+                                      const { apiUpdateProfile } = await import("@/lib/api");
+                                      await apiUpdateProfile(u.id, { role: "user" });
+                                    } catch (e) {}
+                                    loadUsers();
+                                  }}
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5 mr-1" />Разблок.
+                                </Button>
+                              )}
+                              {u.role !== "admin" && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs text-destructive hover:text-destructive"
+                                  onClick={() => openDeleteDialog(u.id)}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 mr-1" />Удалить
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>

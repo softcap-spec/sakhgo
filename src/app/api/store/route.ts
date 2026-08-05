@@ -4,7 +4,7 @@ import { sendTgNotification, isTgConfigured } from "@/lib/notify";
 import { getSession, createSession, clearSession } from "@/lib/session";
 import { sanitizeUser } from "@/lib/db";
 import {
-  dbGetAdminStats, dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
+  dbGetAdminStats, dbSearchProfiles, dbGetProfile, dbLogin, dbCreateProfile, dbUpdateProfile, dbGetAllProfiles,
   dbChangePassword,
   dbVerifyPhone, dbGenerateVerificationCode,
   dbGetPublicListings, dbGetPublicListingsCount, dbGetListingById, dbGetListingByIdAdmin, dbGetHostListingById,
@@ -425,6 +425,13 @@ export async function POST(req: NextRequest) {
       case "setHelpContent": {
         await dbSetHelpContent(params.key, params.value);
         return NextResponse.json({ ok: true });
+      }
+
+
+      case "searchProfiles": {
+        const { search, page = 1, pageSize = 15 } = params;
+        const result = await dbSearchProfiles(search || "", page, pageSize);
+        return NextResponse.json({ ok: true, data: result });
       }
 
       case "getAllProfiles": {

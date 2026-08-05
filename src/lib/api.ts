@@ -96,6 +96,9 @@ export const apiChangePassword = (id: string, currentPassword: string, newPasswo
   call("changePassword", { id, currentPassword, newPassword });
 
 // ── Admin ──
+export const apiSearchProfiles = (search?: string, page?: number, pageSize?: number) =>
+  call("searchProfiles", { search, page, pageSize });
+
 export const apiGetAllProfiles = () => call("getAllProfiles");
 export const apiGetAdminStats = () => call("getAdminStats");
 export const apiGetAllListings = () => call("getAllListings");
