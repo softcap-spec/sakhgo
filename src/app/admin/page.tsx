@@ -187,7 +187,7 @@ export default function AdminPage() {
   const router = useRouter();
   const didMount = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [tab, setTab] = useState<"dashboard" | "moderation" | "reviews" | "users" | "listings" | "payments" | "content" | "categories" | "banners" | "builds">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "moderation" | "reviews" | "users" | "listings" | "payments" | "content" | "categories" | "banners">("dashboard");
   const [pending, setPending] = useState<typeof PENDING_LISTINGS>([]);
   const [users, setUsers] = useState<typeof USERS>([]);
   const [stats, setStats] = useState<any>(null);
@@ -714,7 +714,13 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
             <p className="text-sm text-muted-foreground">Защищённый раздел · {store.user.name}</p>
           </div>
           <div className="flex-1" />
-          <NotificationBell />
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
+              <Rocket className="w-3 h-3" />
+              v{BUILD_HISTORY[0].version} · {BUILD_HISTORY[0].date}
+            </div>
+            <NotificationBell />
+          </div>
         </div>
 
         <div className="flex gap-1 border-b mb-8 mt-6 overflow-x-auto">
@@ -726,7 +732,6 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
             { id: "payments", label: "Платные услуги", icon: Banknote },
             { id: "categories", label: "Категории", icon: Tag, count: categories.length },
             { id: "banners", label: "Баннеры", icon: Megaphone },
-            { id: "builds", label: "Сборки", icon: Rocket },
             { id: "content", label: "Контент", icon: FileText },
           ] as const).map((t) => (
             <button
@@ -1085,9 +1090,6 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
         )}
 
         {/* ── BUILDS ── */}
-        {tab === "builds" && (
-          <BuildsTab />
-        )}
 
         {/* ── CONTENT EDITOR ── */}
         {tab === "content" && (
