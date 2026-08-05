@@ -181,7 +181,13 @@ export async function dbUpdateProfile(id: string, data: Record<string, unknown>)
 
 /** Admin: get all profiles */
 export async function dbGetAllProfiles() {
-  const { rows } = await pool.query("SELECT * FROM profiles ORDER BY created_at DESC");
+  const { rows } = await pool.query(
+    `SELECT p.*,
+       (SELECT COUNT(*) FROM listings WHERE host_id = p.id)::int AS listings_count,
+       (SELECT COUNT(*) FROM bookings WHERE guest_id = p.id)::int AS bookings_count
+     FROM profiles p
+     ORDER BY p.created_at DESC`
+  );
   return rows.map(sanitizeUser);
 }
 

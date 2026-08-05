@@ -40,6 +40,7 @@ const ADMIN_ONLY = new Set([
   "getAdminNotifications", "getUnreadCount", "markNotificationRead", "markAllNotificationsRead",
   "addBanner", "updateBanner", "removeBanner",
   "getPendingEdits", "approveEdit", "rejectEdit", "setHelpContent",
+  "getAllProfiles",
   "createMessagesTable", // one-off migration action — TODO: move to a real migration script
   "testTgNotification",
 ]);

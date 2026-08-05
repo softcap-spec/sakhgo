@@ -112,7 +112,7 @@ export default function AdminPage() {
             name: p.name,
             email: p.email,
             role: p.role,
-            verified: p.verified ?? true,
+            verified: p.email_verified ?? false,
             joined: p.created_at ? new Date(p.created_at).toLocaleDateString("ru-RU") : "—",
             listings: p.listings_count ?? 0,
             bookings: p.bookings_count ?? 0,
