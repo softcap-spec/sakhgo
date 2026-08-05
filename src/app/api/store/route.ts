@@ -576,6 +576,12 @@ export async function POST(req: NextRequest) {
         });
         return NextResponse.json({ ok: true, data: promo });
       }
+      case "getMaintenanceStatus": {
+        const fs = require("fs");
+        const flagPath = "/home/alex/sakhgo/maintenance.flag";
+        const maintenance = fs.existsSync(flagPath);
+        return NextResponse.json({ ok: true, data: { maintenance } });
+      }
       case "getPromoStats": {
         const stats = await dbGetPromoStats();
         return NextResponse.json({ ok: true, data: stats });

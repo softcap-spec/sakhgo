@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  ArrowLeft, Shield, Users, Store, Banknote, CheckCircle, XCircle,
+  ArrowLeft, Shield, Users, Store, Banknote, Wrench, CheckCircle, XCircle,
   Eye, Ban, UserCog, TrendingUp, Clock, Search, Filter, DollarSign,
   FileText, Save, Bold, Italic, Heading, List, ListOrdered,
   Pencil, Tag, Plus, Trash2, Megaphone, Image, MessageSquare, Rocket, LayoutDashboard, BarChart3, UserPlus
@@ -187,7 +187,7 @@ export default function AdminPage() {
   const router = useRouter();
   const didMount = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [tab, setTab] = useState<"dashboard" | "moderation" | "reviews" | "users" | "listings" | "payments" | "content" | "categories" | "banners">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "moderation" | "reviews" | "users" | "listings" | "maintenance" | "payments" | "content" | "categories" | "banners">("dashboard");
   const [pending, setPending] = useState<typeof PENDING_LISTINGS>([]);
   const [users, setUsers] = useState<typeof USERS>([]);
   const [stats, setStats] = useState<any>(null);
@@ -728,6 +728,7 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
             { id: "reviews", label: "Отзывы", icon: MessageSquare },
             { id: "users", label: "Пользователи", icon: Users, count: userTotal },
             { id: "payments", label: "Платные услуги", icon: Banknote },
+            { id: "maintenance", label: "Техработы", icon: Wrench },
             { id: "categories", label: "Категории", icon: Tag, count: categories.length },
             { id: "banners", label: "Баннеры", icon: Megaphone },
             { id: "content", label: "Контент", icon: FileText },
@@ -975,6 +976,40 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
 
         {/* ── PAYMENTS / PROMOTIONS ── */}
         {tab === "payments" && <PromotionsTab />}
+
+        {tab === "maintenance" && (
+          <div className="bg-card border rounded-xl p-6 max-w-lg mx-auto text-center space-y-6">
+            <div className="mx-auto w-16 h-16 rounded-2xl bg-amber-100 flex items-center justify-center">
+              <Wrench className="w-8 h-8 text-amber-600" />
+            </div>
+            <div>
+              <h2 className="font-display text-xl mb-2">Режим техработ</h2>
+              <p className="text-sm text-muted-foreground">
+                Включает красивую заглушку для всех посетителей.
+                API продолжает работать, админка доступна.
+              </p>
+            </div>
+            <div className="bg-muted/50 rounded-lg p-3 font-mono text-sm">
+              SSH: <code className="text-blue-600">sudo bash /home/alex/sakhgo/maintenance.sh on|off|status</code>
+            </div>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const r = await fetch("/api/store", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "getMaintenanceStatus" }),
+                  });
+                  const d = await r.json();
+                  alert(d.data?.maintenance ? "🔧 Техработы ВКЛЮЧЕНЫ" : "✅ Сайт работает");
+                } catch { alert("Ошибка проверки"); }
+              }}
+            >
+              Проверить статус
+            </Button>
+          </div>
+        )}
 
         {/* ── CATEGORIES ── */}
         {tab === "categories" && (
