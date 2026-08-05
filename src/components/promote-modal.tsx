@@ -99,8 +99,8 @@ export function PromoteModal({
         price,
       });
 
-      if (!initResult?.ok) throw new Error(initResult?.error ?? "Не удалось создать промо");
-      const promotionId: string = initResult.data.id;
+      const promotionId = initResult?.id;
+      if (!promotionId) throw new Error("Не удалось создать промо");
 
       // Шаг 2: создаём платёж в ЮKassa, получаем paymentUrl
       const { paymentUrl } = await apiCreatePayment(promotionId);
