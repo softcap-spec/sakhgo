@@ -542,7 +542,7 @@ export async function POST(req: NextRequest) {
 
       // ── Promotions ──
       case "getAllPromotions": {
-        const limit = params.limit ? parseInt(String(params.limit)) : undefined; const promos = await dbGetAllPromotions(limit);
+        const page = params.page ? parseInt(String(params.page)) : 1; const pageSize = params.pageSize ? parseInt(String(params.pageSize)) : 15; const promos = await dbGetAllPromotions(page, pageSize);
         return NextResponse.json({ ok: true, data: promos });
       }
       case "getPromoPricing": {

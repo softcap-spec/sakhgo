@@ -1155,16 +1155,20 @@ export async function dbGetHostListingStats(hostId: string, listingId: string, d
 
 // ── Promotions (admin) ──
 
-export async function dbGetAllPromotions(limit?: number) {
-  const { rows } = await pool.query(
-    `SELECT p.*, l.type AS listing_type, l.location
-     FROM promotions p
-     LEFT JOIN listings l ON l.id = p.listing_id
-     ORDER BY p.created_at DESC
-     LIMIT $1`,
-    [limit || 1000]
-  );
-  return rows;
+export async function dbGetAllPromotions(page = 1, pageSize = 15) {
+  const offset = (page - 1) * pageSize;
+  const [{ rows }, { rows: [{ total }] }] = await Promise.all([
+    pool.query(
+      `SELECT p.*, l.type AS listing_type, l.location
+       FROM promotions p
+       LEFT JOIN listings l ON l.id = p.listing_id
+       ORDER BY p.created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [pageSize, offset]
+    ),
+    pool.query(`SELECT COUNT(*)::int AS total FROM promotions`),
+  ]);
+  return { items: rows, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
 }
 
 export async function dbGetPromoPricing() {

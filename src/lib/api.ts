@@ -161,7 +161,7 @@ export const apiGetListingStats = (listingId: string, days?: number) => call("ge
 export const apiGetHostStats = (hostId: string, days?: number) => call("getHostStats", { hostId, days: days || 7 });
 export const apiGetHostListingStats = (hostId: string, listingId: string, days?: number) => call("getHostListingStats", { hostId, listingId, days: days || 7 });
 
-export const apiGetAllPromotions = (limit?: number) => call("getAllPromotions", { limit });
+export const apiGetAllPromotions = (page = 1, pageSize = 15) => call("getAllPromotions", { page, pageSize });
 export const apiGetPromoPricing = () => call("getPromoPricing");
 export const apiUpdatePromoPricing = (promoType: string, prices: Record<string,unknown>) => call("updatePromoPricing", { promoType, prices });
 export const apiUpdatePromotionStatus = (id: string, status: string) => call("updatePromotionStatus", { id, status });

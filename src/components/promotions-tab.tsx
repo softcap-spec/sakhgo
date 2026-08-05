@@ -80,25 +80,32 @@ export function PromotionsTab() {
     total_impressions: 0, total_clicks: 0, total_contacts: 0, total_bookings: 0, total_revenue: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [editPrices, setEditPrices] = useState(false);
   const [priceDrafts, setPriceDrafts] = useState<Record<string, { d7: string; d14: string; d21: string; d30: string; enabled: boolean }>>({});
   const [view, setView] = useState<"list" | "pricing">("list");
 
-  const loadData = async () => {
+  const loadData = async (pg = page) => {
     setLoading(true);
     const { apiGetAllPromotions, apiGetPromoPricing, apiGetPromoStats } = await import("@/lib/api");
     const [p, pr, s] = await Promise.all([
-      apiGetAllPromotions(15).catch(() => []),
+      apiGetAllPromotions(pg, 15).catch(() => ({ items: [], total: 0, page: 1, pageSize: 15, totalPages: 1 })),
       apiGetPromoPricing().catch(() => []),
       apiGetPromoStats().catch(() => null),
     ]);
-    setPromos(Array.isArray(p) ? p : []);
+    setPromos(Array.isArray(p?.items) ? p.items : Array.isArray(p) ? p : []);
+    if (p?.total !== undefined) setTotal(p.total);
+    if (p?.totalPages !== undefined) setTotalPages(p.totalPages);
     setPricing(Array.isArray(pr) ? pr : []);
     if (s) setStats(s);
     setLoading(false);
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(1); }, []);
+
+  const changePage = (pg: number) => { setPage(pg); loadData(pg); };
 
   const openPriceEditor = () => {
     const drafts: Record<string, { d7: string; d14: string; d21: string; d30: string; enabled: boolean }> = {};
@@ -127,13 +134,13 @@ export function PromotionsTab() {
       }).catch(() => {});
     }
     setEditPrices(false);
-    loadData();
+    loadData(page);
   };
 
   const updateStatus = async (id: string, status: string) => {
     const { apiUpdatePromotionStatus } = await import("@/lib/api");
     await apiUpdatePromotionStatus(id, status).catch(() => {});
-    loadData();
+    loadData(page);
   };
 
   const formatDate = (d: string | null) => {
@@ -322,6 +329,18 @@ export function PromotionsTab() {
               </tbody>
             </table>
           </div>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t bg-muted/20">
+              <span className="text-xs text-muted-foreground">
+                {total} всего · стр. {page} из {totalPages}
+              </span>
+              <div className="flex gap-1">
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page <= 1} onClick={() => changePage(page - 1)}>Назад</Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={page >= totalPages} onClick={() => changePage(page + 1)}>Вперёд</Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
