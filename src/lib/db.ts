@@ -1155,12 +1155,14 @@ export async function dbGetHostListingStats(hostId: string, listingId: string, d
 
 // ── Promotions (admin) ──
 
-export async function dbGetAllPromotions() {
+export async function dbGetAllPromotions(limit?: number) {
   const { rows } = await pool.query(
     `SELECT p.*, l.type AS listing_type, l.location
      FROM promotions p
      LEFT JOIN listings l ON l.id = p.listing_id
-     ORDER BY p.created_at DESC`
+     ORDER BY p.created_at DESC
+     LIMIT $1`,
+    [limit || 1000]
   );
   return rows;
 }
@@ -1275,7 +1277,23 @@ export async function dbGetPromoStats() {
        COALESCE(SUM(CASE WHEN status IN ('paid','active') THEN price ELSE 0 END),0)::int AS total_revenue
      FROM promotions`
   );
-  return rows[0];
+  const stats = rows[0];
+
+  // Monthly revenue breakdown (last 12 months)
+  const { rows: monthly } = await pool.query(
+    `SELECT
+       to_char(date_trunc('month', paid_at), 'YYYY-MM') AS month,
+       SUM(price)::int AS revenue,
+       COUNT(*)::int AS count
+     FROM promotions
+     WHERE status IN ('paid','active') AND paid_at IS NOT NULL
+       AND paid_at >= now() - interval '12 months'
+     GROUP BY date_trunc('month', paid_at)
+     ORDER BY month`
+  );
+  stats.monthly_revenue = monthly;
+
+  return stats;
 }
 
 /** Seller: get own promotions */

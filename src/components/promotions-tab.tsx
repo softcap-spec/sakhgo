@@ -54,6 +54,7 @@ interface PromoStats {
   total_contacts: number;
   total_bookings: number;
   total_revenue: number;
+  monthly_revenue?: { month: string; revenue: number; count: number }[];
 }
 
 const PROMO_LABELS: Record<string, string> = { top: "ТОП", highlight: "Выделение", urgent: "Срочно" };
@@ -87,7 +88,7 @@ export function PromotionsTab() {
     setLoading(true);
     const { apiGetAllPromotions, apiGetPromoPricing, apiGetPromoStats } = await import("@/lib/api");
     const [p, pr, s] = await Promise.all([
-      apiGetAllPromotions().catch(() => []),
+      apiGetAllPromotions(15).catch(() => []),
       apiGetPromoPricing().catch(() => []),
       apiGetPromoStats().catch(() => null),
     ]);
@@ -175,6 +176,31 @@ export function PromotionsTab() {
         ))}
       </div>
 
+
+      {/* Monthly Revenue Breakdown */}
+      {stats.monthly_revenue && stats.monthly_revenue.length > 0 && (
+        <div className="bg-card border rounded-xl p-4 mb-8">
+          <h3 className="font-display text-sm text-muted-foreground mb-3">Выручка по месяцам</h3>
+          <div className="space-y-2">
+            {stats.monthly_revenue.map((m: { month: string; revenue: number; count: number }) => {
+              const maxRev = Math.max(...stats.monthly_revenue!.map((x: { revenue: number }) => x.revenue));
+              const pct = maxRev > 0 ? (m.revenue / maxRev) * 100 : 0;
+              const [y, mo] = m.month.split("-");
+              const label = new Date(parseInt(y), parseInt(mo)-1).toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+              return (
+                <div key={m.month} className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground w-20 shrink-0 text-right">{label}</span>
+                  <div className="flex-1 bg-muted rounded-full h-5 overflow-hidden">
+                    <div className="bg-green-500 h-full rounded-full transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="text-xs font-mono w-24 shrink-0">{m.revenue.toLocaleString("ru-RU")} ₽</span>
+                  <span className="text-xs text-muted-foreground w-10 shrink-0 text-right">{m.count} шт.</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {view === "pricing" ? (
         /* ── Pricing Editor ── */
         <div className="bg-card border rounded-xl p-6">
