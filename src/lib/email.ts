@@ -57,7 +57,7 @@ export async function sendAdminEmailNotification(type: string, text: string, lin
   try {
     const t = getTransporter();
     await t.sendMail({
-      from: SMTP_CONFIG.auth.user || "noreply@sakhgo.ru",
+      from: "noreply@sakhgo.ru",
       to: emails.join(", "),
       subject,
       html: htmlBody,
@@ -100,7 +100,7 @@ export async function sendUserEmailNotification(toEmail: string, type: "message"
   try {
     const t = getTransporter();
     await t.sendMail({
-      from: SMTP_CONFIG.auth.user || "noreply@sakhgo.ru",
+      from: "noreply@sakhgo.ru",
       to: toEmail,
       subject,
       html: htmlBody,
@@ -112,6 +112,42 @@ export async function sendUserEmailNotification(toEmail: string, type: "message"
 }
 
 /** Send password reset email with a one-time link */
+export async function sendEmailVerification(
+  toEmail: string, name: string, token: string
+) {
+  const verifyLink = "https://sakhgo.ru/api/store?action=verifyEmail&token=" + token;
+
+  const htmlBody = [
+    '<div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; background: #f0fdf4; border-radius: 12px;">',
+    '<div style="background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">',
+    '<div style="font-size: 36px; margin-bottom: 12px; text-align: center;">✉️</div>',
+    '<h2 style="font-size: 20px; font-weight: 700; margin: 0 0 8px; color: #111; text-align: center;">Подтверждение email</h2>',
+    '<p style="font-size: 14px; color: #555; line-height: 1.6; margin: 0 0 16px; text-align: center;">',
+    'Здравствуйте, ' + name + '!<br>',
+    'Спасибо за регистрацию на СахGO. Чтобы подтвердить ваш email, нажмите кнопку ниже.</p>',
+    '<div style="text-align: center; margin-bottom: 16px;">',
+    '<a href="' + verifyLink + '" style="display: inline-block; padding: 12px 32px; background: #22c55e; color: #fff; text-decoration: none; border-radius: 8px; font-size: 15px; font-weight: 600;">Подтвердить email</a>',
+    '</div>',
+    '<p style="font-size: 12px; color: #999; text-align: center;">Ссылка действительна 24 часа.</p>',
+    '</div>',
+    '<div style="text-align: center; margin-top: 14px; font-size: 11px; color: #999;">СахGO — жильё, туры, рыбалка, снаряжение на Сахалине</div>',
+    '</div>'
+  ].join("\n");
+
+  try {
+    const t = getTransporter();
+    await t.sendMail({
+      from: "noreply@sakhgo.ru",
+      to: toEmail,
+      subject: "Подтверждение email — СахGO",
+      html: htmlBody,
+    });
+    console.log("[email] Sent verification to " + toEmail);
+  } catch (e) {
+    console.error("[email] Failed to send verification:", e);
+  }
+}
+
 export async function sendPasswordResetEmail(toEmail: string, userName: string, resetLink: string) {
   const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://sakhgo.ru";
   const fullLink = resetLink.startsWith("http") ? resetLink : BASE_URL + resetLink;
@@ -133,7 +169,7 @@ export async function sendPasswordResetEmail(toEmail: string, userName: string, 
   try {
     const t = getTransporter();
     await t.sendMail({
-      from: SMTP_CONFIG.auth.user || "noreply@sakhgo.ru",
+      from: "noreply@sakhgo.ru",
       to: toEmail,
       subject: "Сброс пароля — СахGO",
       html: htmlBody,

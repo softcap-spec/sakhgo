@@ -30,6 +30,9 @@ export const apiForgotPassword = (email: string) =>
 export const apiResetPassword = (token: string, password: string) =>
   call("resetPassword", { token, password });
 
+export const apiVerifyEmail = (token: string) =>
+  call("verifyEmail", { token });
+
 export const apiLogin = (email: string, password: string) =>
   call("login", { email, password });
 export const apiRegister = (name: string, email: string, phone: string, password: string) =>

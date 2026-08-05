@@ -84,6 +84,30 @@ export async function dbResetPassword(token: string, newPassword: string) {
   return rows[0];
 }
 
+// ── Email Verification ──
+
+export async function dbCreateEmailVerificationCode(email: string) {
+  const token = crypto.randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const { rows: [r] } = await pool.query(
+    `UPDATE profiles SET email_verification_code = $1, email_verification_expires = $2
+     WHERE email = $3 AND email_verified = false
+     RETURNING id, email, name`,
+    [token, expires.toISOString(), email]
+  );
+  return r ? { id: r.id, email: r.email, name: r.name, token, expires } : null;
+}
+
+export async function dbVerifyEmail(token: string) {
+  const { rows: [r] } = await pool.query(
+    `UPDATE profiles SET email_verified = true, email_verification_code = NULL, email_verification_expires = NULL
+     WHERE email_verification_code = $1 AND email_verification_expires > NOW()
+     RETURNING id, email, name, email_verified`,
+    [token]
+  );
+  return r || null;
+}
+
 export async function dbCreateProfile(profile: {
   name: string; email: string; phone: string; password?: string;
 }) {

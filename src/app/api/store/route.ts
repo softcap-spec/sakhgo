@@ -26,6 +26,7 @@ import {
   dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbGetPromoStats,
   dbExpirePromotions,
   dbGetMyPromotions, dbIncrementPromoStats,
+  dbCreateEmailVerificationCode, dbVerifyEmail,
   dbCreatePasswordResetToken, dbResetPassword,
 } from "@/lib/db";
 
@@ -153,6 +154,16 @@ export async function POST(req: NextRequest) {
         await sendPasswordResetEmail(resetEntry.email, resetEntry.name, "/reset-password?token=" + resetEntry.token);
         return NextResponse.json({ ok: true, message: "Ссылка для сброса пароля отправлена на email" });
       }
+      case "verifyEmail": {
+        if (!params.token) {
+          return NextResponse.json({ ok: false, error: "Токен подтверждения обязателен" });
+        }
+        const vUser = await dbVerifyEmail(params.token as string);
+        if (!vUser) {
+          return NextResponse.json({ ok: false, error: "Ссылка недействительна или истекла" });
+        }
+        return NextResponse.json({ ok: true, data: vUser, message: "Email подтверждён" });
+      }
       case "resetPassword": {
         if (!params.token || !params.password) {
           return NextResponse.json({ ok: false, error: "Токен и новый пароль обязательны" });
@@ -178,8 +189,16 @@ export async function POST(req: NextRequest) {
         const user = await dbCreateProfile({
           name: params.name, email: params.email, phone: params.phone || "", password: params.password
         });
+
+        // Generate email verification code and send email
+        const vEntry = await dbCreateEmailVerificationCode(params.email);
+        if (vEntry) {
+          const { sendEmailVerification } = await import("@/lib/email");
+          await sendEmailVerification(vEntry.email, vEntry.name, vEntry.token);
+        }
+
         await createSession(user.id, user.role || "user");
-        return NextResponse.json({ ok: true, data: sanitizeUser(user) });
+        return NextResponse.json({ ok: true, data: sanitizeUser(user), message: "Проверьте email для подтверждения" });
       }
       case "logout": {
         await clearSession();

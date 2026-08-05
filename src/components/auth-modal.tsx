@@ -81,6 +81,7 @@ export function AuthModal() {
   const [verificationError, setVerificationError] = useState("");
   const [verificationSuccess, setVerificationSuccess] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState("");
+  const [regSuccess, setRegSuccess] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotError, setForgotError] = useState("");
@@ -135,7 +136,10 @@ export function AuthModal() {
     try {
       const user = await store.register(regName.trim(), regEmail.trim(), normalizedPhone, regPass);
       if (!user) { setRegError("Не удалось зарегистрироваться. Проверьте email и телефон на занятость."); setLoading(false); return; }
-      
+
+      // Registration succeeded — show email verification notice
+      setRegSuccess(true);
+
       // Generate verification code and show it
       setRegisteredEmail(regEmail.trim());
       try {
@@ -169,7 +173,9 @@ export function AuthModal() {
   const reset = () => {
     setLoginEmail(""); setLoginPass("");
     setRegName(""); setRegPhone("+7 "); setRegEmail(""); setRegPass("");
-    setPhoneError(""); setRegError("");
+    setPhoneError("");
+    setRegSuccess(false);
+    setRegError("");
     setMode(store.authMode);
     setVerificationStep("none");
     setVerificationCode("");
@@ -368,6 +374,18 @@ export function AuthModal() {
               </div>
             ) : (
               <div className="space-y-4 pt-2">
+                {regSuccess && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                    <p className="font-medium text-green-800 mb-2">Аккаунт создан!</p>
+                    <p className="text-sm text-green-700 mb-3">
+                      На ваш email отправлено письмо для подтверждения от <strong>noreply@sakhgo.ru</strong>.
+                      Проверьте почту и перейдите по ссылке в письме.
+                    </p>
+                    <Button variant="outline" size="sm" onClick={() => { store.setAuthOpen(false); reset(); }} className="text-green-700">
+                      Понятно, проверить позже
+                    </Button>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Имя</Label>
                   <Input placeholder="Иван Петров" value={regName} onChange={(e) => setRegName(e.target.value)} />
