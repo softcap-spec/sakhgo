@@ -314,7 +314,7 @@ export function AuthModal() {
               </DialogTitle>
             </DialogHeader>
 
-            : mode === "forgot" ? (
+            {mode === "forgot" ? (
               <div className="space-y-4 pt-2">
                 {forgotSent ? (
                   <div className="text-center py-6">
@@ -336,7 +336,7 @@ export function AuthModal() {
                   </>
                 )}
               </div>
-            ) : {mode === "login" ? (
+            ) : mode === "login" ? (
               <div className="space-y-4 pt-2">
                 <div className="space-y-2">
                   <Label>Email</Label>
