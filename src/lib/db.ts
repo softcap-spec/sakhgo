@@ -143,14 +143,30 @@ export async function dbChangePassword(id: string, currentPassword: string, newP
 /** Verify phone with code that was generated during registration or later */
 export async function dbVerifyPhone(email: string, code: string) {
   const { rows } = await pool.query(
-    "SELECT id, verification_code FROM profiles WHERE email = $1",
+    "SELECT id, verification_code, verification_attempts, updated_at FROM profiles WHERE email = $1",
     [email]
   );
   if (!rows[0]) return { ok: false, error: "Пользователь не найден" };
   if (!rows[0].verification_code) return { ok: false, error: "Код не был сгенерирован. Запросите новый код." };
-  if (rows[0].verification_code !== code) return { ok: false, error: "Неверный код подтверждения" };
+
+  // Rate limit: max 5 attempts
+  const attempts = rows[0].verification_attempts || 0;
+  if (attempts >= 5) return { ok: false, error: "Слишком много попыток. Запросите новый код." };
+
+  // Code expires after 10 minutes
+  const ageMinutes = (Date.now() - new Date(rows[0].updated_at).getTime()) / 60000;
+  if (ageMinutes > 10) return { ok: false, error: "Код истёк. Запросите новый код." };
+
+  if (rows[0].verification_code !== code) {
+    await pool.query(
+      "UPDATE profiles SET verification_attempts = COALESCE(verification_attempts, 0) + 1 WHERE email = $1",
+      [email]
+    );
+    return { ok: false, error: "Неверный код подтверждения" };
+  }
+
   await pool.query(
-    "UPDATE profiles SET phone_verified = true, verification_code = NULL, updated_at = now() WHERE email = $1",
+    "UPDATE profiles SET phone_verified = true, verification_code = NULL, verification_attempts = 0, updated_at = now() WHERE email = $1",
     [email]
   );
   return { ok: true };
@@ -160,7 +176,7 @@ export async function dbVerifyPhone(email: string, code: string) {
 export async function dbGenerateVerificationCode(email: string) {
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const { rows } = await pool.query(
-    "UPDATE profiles SET verification_code = $1, updated_at = now() WHERE email = $2 RETURNING id",
+    "UPDATE profiles SET verification_code = $1, updated_at = now(), verification_attempts = 0 WHERE email = $2 RETURNING id",
     [code, email]
   );
   if (!rows[0]) return { ok: false, error: "Пользователь не найден" };
