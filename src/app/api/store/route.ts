@@ -44,6 +44,7 @@ const ADMIN_ONLY = new Set([
   "testTgNotification",
   "searchProfiles",
   "getAdminStats",
+  "getMaintenanceStatus",
 ]);
 
 // Actions that operate on "my own" resource: the given param must match the
@@ -242,7 +243,8 @@ export async function POST(req: NextRequest) {
       case "generateVerificationCode": {
         const result = await dbGenerateVerificationCode(params.email);
         if (!result.ok) return NextResponse.json({ ok: false, error: result.error });
-        return NextResponse.json({ ok: true, data: result.code });
+        // Code is sent via SMS / email — never returned to client
+        return NextResponse.json({ ok: true });
       }
 
       // ── Public listings (catalog) ──
@@ -579,6 +581,15 @@ export async function POST(req: NextRequest) {
         const flagPath = "/home/alex/sakhgo/maintenance.flag";
         const maintenance = fs.existsSync(flagPath);
         return NextResponse.json({ ok: true, data: { maintenance } });
+      }
+      case "getPromotionStatus": {
+        if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+        const { rows: [promo] } = await pool.query(
+          "SELECT status FROM promotions WHERE id = $1 AND host_id = $2",
+          [params.promotionId, session.userId]
+        );
+        if (!promo) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+        return NextResponse.json({ ok: true, status: promo.status });
       }
       case "getPromoStats": {
         const stats = await dbGetPromoStats();

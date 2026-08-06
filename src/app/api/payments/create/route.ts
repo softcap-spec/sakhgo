@@ -8,7 +8,7 @@
  * Переменные окружения:
  *   YOOKASSA_SHOP_ID       — shopId из личного кабинета ЮKassa
  *   YOOKASSA_SECRET        — secretKey из личного кабинета ЮKassa
- *   NEXT_PUBLIC_BASE_URL   — https://sakhgo.ru
+ *   NEXT_PUBLIC_SITE_URL   — https://sakhgo.ru
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,7 +18,7 @@ import { randomUUID } from "crypto";
 
 const SHOP_ID  = process.env.YOOKASSA_SHOP_ID;
 const SECRET   = process.env.YOOKASSA_SECRET;
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? "https://sakhgo.ru";
+const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://sakhgo.ru";
 
 export const dynamic = "force-dynamic";
 
