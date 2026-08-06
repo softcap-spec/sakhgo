@@ -1465,7 +1465,7 @@ export async function dbGetAdminStats(): Promise<AdminStats> {
 
 export async function dbGetBuilds() {
   const { rows } = await pool.query(
-    "SELECT id, version, date, description, hash, changes, created_at FROM builds ORDER BY created_at DESC, id DESC"
+    "SELECT id, version, date, description, hash, changes, created_at FROM builds ORDER BY date DESC, id DESC"
   );
   return rows;
 }
