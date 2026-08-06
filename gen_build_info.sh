@@ -1,8 +1,7 @@
 # Generate build info at build time
-# This runs before next build and creates a JSON file with git info
 GIT_HASH=$(git rev-parse --short HEAD)
 GIT_DATE=$(git log -1 --format=%cd --date=short HEAD)
-GIT_MSG=$(git log -1 --format=%s HEAD)
+GIT_MSG=$(git log -1 --format=%s HEAD | sed 's/"/\\"/g')
 PKG_VER=$(node -p "require('./package.json').version")
 
 cat > src/lib/build-info.ts << EOF
