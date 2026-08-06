@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { CheckCircle, Clock, Rocket, Terminal } from "lucide-react";
+import { CheckCircle, Clock, Rocket } from "lucide-react";
 
 interface BuildEntry {
   id?: number;
@@ -48,7 +48,6 @@ const FALLBACK_HISTORY: BuildEntry[] = [
 export function BuildsTab() {
   const [builds, setBuilds] = useState<BuildEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [recording, setRecording] = useState(false);
 
   const loadBuilds = async () => {
     setLoading(true);
@@ -62,20 +61,6 @@ export function BuildsTab() {
 
   useEffect(() => { loadBuilds(); }, []);
 
-  const recordBuild = async () => {
-    setRecording(true);
-    try {
-      const info = await fetch("/api/build-info").then(r => r.json());
-      if (info && !info.error) {
-        const { apiRecordBuild } = await import("@/lib/api");
-        await apiRecordBuild(info);
-        await loadBuilds();
-      }
-    } finally {
-      setRecording(false);
-    }
-  };
-
   const history = builds.length > 0 ? builds : FALLBACK_HISTORY;
 
   if (loading) return <div className="py-8 text-center text-muted-foreground">Загрузка...</div>;
@@ -88,10 +73,6 @@ export function BuildsTab() {
           <Badge className="text-sm px-3 py-1">
             {history.length} сборок
           </Badge>
-          <Button size="sm" onClick={recordBuild} disabled={recording} className="h-8">
-            <Terminal className="w-3.5 h-3.5 mr-1.5" />
-            {recording ? "Запись..." : "Записать сборку"}
-          </Button>
         </div>
       </div>
 
