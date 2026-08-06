@@ -717,17 +717,14 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
           </div>
           <div className="flex-1" />
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
+            <button
+              onClick={() => setShowBuildsModal(true)}
+              className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 hover:bg-muted px-3 py-1.5 rounded-full transition-colors"
+              title="История сборок"
+            >
               <Rocket className="w-3 h-3" />
-              <button
-                onClick={() => setShowBuildsModal(true)}
-                className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 hover:bg-muted px-3 py-1.5 rounded-full transition-colors"
-                title="История сборок"
-              >
-                <Rocket className="w-3 h-3" />
-                v{BUILD_VERSION}
-              </button>
-            </div>
+              v{BUILD_VERSION}
+            </button>
             <NotificationBell />
           </div>
         </div>
@@ -1337,6 +1334,23 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* ── Builds History Modal ── */}
+      {showBuildsModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50" onClick={() => setShowBuildsModal(false)} />
+          <div className="relative bg-background w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl shadow-2xl mx-4">
+            <div className="sticky top-0 bg-background z-10 flex items-center justify-between p-6 pb-4 border-b">
+              <h2 className="font-display text-xl">История сборок</h2>
+              <Button size="sm" variant="ghost" onClick={() => setShowBuildsModal(false)} className="h-8 w-8 p-0">
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="p-6">
+              <BuildsTab />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
