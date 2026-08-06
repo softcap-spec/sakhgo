@@ -95,7 +95,14 @@ export function PromotionsTab() {
       apiGetPromoPricing().catch(() => []),
       apiGetPromoStats().catch(() => null),
     ]);
-    setPromos(Array.isArray(p?.items) ? p.items : Array.isArray(p) ? p : []);
+    const items = Array.isArray(p?.items) ? p.items : Array.isArray(p) ? p : [];
+    // Fallback: if page is empty but there are items total, reload page 1
+    if (items.length === 0 && p?.total > 0 && pg > 1) {
+      setPage(1);
+      loadData(1);
+      return;
+    }
+    setPromos(items);
     if (p?.total !== undefined) setTotal(p.total);
     if (p?.totalPages !== undefined) setTotalPages(p.totalPages);
     setPricing(Array.isArray(pr) ? pr : []);
@@ -147,7 +154,8 @@ export function PromotionsTab() {
     if (!confirm(`Удалить продвижение «${title}»?`)) return;
     const { apiDeletePromotion } = await import("@/lib/api");
     await apiDeletePromotion(id).catch(() => {});
-    loadData(page);
+    setPage(1);
+    loadData(1);
   };
 
   const formatDate = (d: string | null) => {
