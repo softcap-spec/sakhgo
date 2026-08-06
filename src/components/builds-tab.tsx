@@ -52,9 +52,9 @@ export function BuildsTab() {
   const loadBuilds = async () => {
     setLoading(true);
     const { apiGetBuilds } = await import("@/lib/api");
-    const r = await apiGetBuilds() as any;
-    if (r?.builds && r.builds.length > 0) {
-      setBuilds(r.builds);
+    const r = (await apiGetBuilds()) as any;
+    if (Array.isArray(r) && r.length > 0) {
+      setBuilds(r);
     }
     setLoading(false);
   };
