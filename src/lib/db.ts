@@ -236,6 +236,15 @@ export async function dbGetAllListings() {
 }
 
 
+export async function dbDeletePromotion(id: string) {
+  // Only delete non-active promotions (expired/cancelled/refunded/draft)
+  const { rowCount } = await pool.query(
+    "DELETE FROM promotions WHERE id = $1 AND status != 'active' AND status != 'pending'",
+    [id]
+  );
+  return { ok: true, deleted: (rowCount ?? 0) > 0 };
+}
+
 export async function dbApplyListingPromo(
   hostId: string, listingId: string,
   promoType: "top" | "urgent" | "highlight", durationDays: number = 7

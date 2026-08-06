@@ -24,7 +24,7 @@ import {
   dbGetEmailNotificationPref, dbSetEmailNotificationPref,
   dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
   dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats, dbInitPromoPayment,
-  dbExpirePromotions,
+  dbExpirePromotions, dbDeletePromotion,
   dbGetMyPromotions, dbIncrementPromoStats,
   dbCreateEmailVerificationCode, dbVerifyEmail,
   dbCreatePasswordResetToken, dbResetPassword,
@@ -44,6 +44,7 @@ const ADMIN_ONLY = new Set([
   "testTgNotification",
   "searchProfiles",
   "getAdminStats",
+  "deletePromotion",
   "getMaintenanceStatus",
 ]);
 
@@ -581,6 +582,10 @@ export async function POST(req: NextRequest) {
         const flagPath = "/home/alex/sakhgo/maintenance.flag";
         const maintenance = fs.existsSync(flagPath);
         return NextResponse.json({ ok: true, data: { maintenance } });
+      }
+      case "deletePromotion": {
+        const result = await dbDeletePromotion(params.id);
+        return NextResponse.json(result);
       }
       case "getPromotionStatus": {
         if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });

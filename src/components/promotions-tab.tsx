@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import {
   DollarSign, TrendingUp, CheckCircle, XCircle, Edit2, Save, Ban,
-  RefreshCw, Zap, BarChart3, Eye, MousePointer, Users, ShoppingBag,
+  RefreshCw, Zap, BarChart3, Eye, MousePointer, Users, ShoppingBag, Trash2,
 } from "lucide-react";
 
 interface Promotion {
@@ -140,6 +140,13 @@ export function PromotionsTab() {
   const updateStatus = async (id: string, status: string) => {
     const { apiUpdatePromotionStatus } = await import("@/lib/api");
     await apiUpdatePromotionStatus(id, status).catch(() => {});
+    loadData(page);
+  };
+
+  const deletePromotion = async (id: string, title: string) => {
+    if (!confirm(`Удалить продвижение «${title}»?`)) return;
+    const { apiDeletePromotion } = await import("@/lib/api");
+    await apiDeletePromotion(id).catch(() => {});
     loadData(page);
   };
 
@@ -317,7 +324,9 @@ export function PromotionsTab() {
                           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => updateStatus(p.id, "active")}>Активировать</Button>
                         )}
                         {(p.status === "expired" || p.status === "refunded" || p.status === "cancelled") && (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => deletePromotion(p.id, p.listing_title)} title="Удалить">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
                         )}
                       </div>
                     </td>

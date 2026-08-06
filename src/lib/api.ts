@@ -165,6 +165,7 @@ export const apiGetAllPromotions = (page = 1, pageSize = 15) => call("getAllProm
 export const apiGetPromoPricing = () => call("getPromoPricing");
 export const apiUpdatePromoPricing = (promoType: string, prices: Record<string,unknown>) => call("updatePromoPricing", { promoType, prices });
 export const apiUpdatePromotionStatus = (id: string, status: string) => call("updatePromotionStatus", { id, status });
+export const apiDeletePromotion = (id: string) => call("deletePromotion", { id });
 export const apiCreatePromotion = (params: Record<string,unknown>) => call("createPromotion", params);
 export const apiGetPromoStats = () => call("getPromoStats");
 export const apiExpirePromotions = () => call("expirePromotions");
