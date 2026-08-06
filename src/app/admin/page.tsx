@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { NotificationBell } from "@/components/notification-bell";
 import { ReviewsTab } from "@/components/reviews-tab";
+import { BUILD_VERSION, BUILD_HASH, BUILD_DATE } from "@/lib/build-info";
 import { PromotionsTab } from "@/components/promotions-tab";
 
 // ── Mock data ──
@@ -194,14 +195,7 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const [userPage, setUserPage] = useState(1);
   const [userTotal, setUserTotal] = useState(0);
-  const [headerBuilds, setHeaderBuilds] = useState<BuildEntry[]>([]);
 
-  // Load builds for header version display
-  useEffect(() => {
-    import("@/lib/api").then(m => m.apiGetBuilds().then((r: any) => {
-      if (r?.builds?.length) setHeaderBuilds(r.builds);
-    }));
-  }, []);
   const USER_PAGE_SIZE = 15;
 
   // If user is logged in as admin, load data
@@ -723,7 +717,7 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
               <Rocket className="w-3 h-3" />
-              {headerBuilds.length > 0 ? `v${headerBuilds[0].version} · ${headerBuilds[0].date}` : <>v{BUILD_HISTORY[0].version} · {BUILD_HISTORY[0].date}</>}
+              v{BUILD_VERSION} · {BUILD_DATE}
             </div>
             <NotificationBell />
           </div>
