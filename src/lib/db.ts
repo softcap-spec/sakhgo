@@ -1460,3 +1460,24 @@ export async function dbGetAdminStats(): Promise<AdminStats> {
     usersByRole: roleRows || [],
   };
 }
+
+// ── Builds History ──
+
+export async function dbGetBuilds() {
+  const { rows } = await pool.query(
+    "SELECT id, version, date, description, hash, changes, created_at FROM builds ORDER BY created_at DESC"
+  );
+  return rows;
+}
+
+export async function dbRecordBuild(params: {
+  version: string; date: string; description: string; hash: string; changes: string[];
+}) {
+  const { rows } = await pool.query(
+    `INSERT INTO builds (version, date, description, hash, changes)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [params.version, params.date, params.description, params.hash, JSON.stringify(params.changes)]
+  );
+  return { ok: true, inserted: !!rows[0] };
+}

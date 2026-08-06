@@ -171,3 +171,7 @@ export const apiGetPromoStats = () => call("getPromoStats");
 export const apiExpirePromotions = () => call("expirePromotions");
 export const apiGetMyPromotions = (hostId: string) => call("getMyPromotions", { hostId });
 export const apiIncrementPromoClick = (listingId: string) => call("incrementPromoClick", { listingId });
+
+export const apiGetBuilds = () => call("getBuilds");
+
+export const apiRecordBuild = (params: Record<string, unknown>) => call("recordBuild", params);

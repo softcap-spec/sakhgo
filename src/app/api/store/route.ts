@@ -25,7 +25,7 @@ import {
   dbGetListingStats, dbGetHostStats, dbGetHostListingStats, dbIncrementListingViews,
   dbGetAllPromotions, dbGetPromoPricing, dbUpdatePromoPricing, dbUpdatePromotionStatus, dbCreatePromotion, dbApplyListingPromo, dbGetPromoStats, dbInitPromoPayment,
   dbExpirePromotions, dbDeletePromotion,
-  dbGetMyPromotions, dbIncrementPromoStats,
+  dbGetMyPromotions, dbIncrementPromoStats, dbGetBuilds, dbRecordBuild,
   dbCreateEmailVerificationCode, dbVerifyEmail,
   dbCreatePasswordResetToken, dbResetPassword,
 } from "@/lib/db";
@@ -45,6 +45,7 @@ const ADMIN_ONLY = new Set([
   "searchProfiles",
   "getAdminStats",
   "deletePromotion",
+  "recordBuild",
   "getMaintenanceStatus",
 ]);
 
@@ -686,6 +687,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      case "getBuilds": {
+        const builds = await dbGetBuilds();
+        return NextResponse.json({ ok: true, builds });
+      }
+      case "recordBuild": {
+        if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+        const result = await dbRecordBuild(params);
+        return NextResponse.json(result);
+      }
       default:
         return NextResponse.json({ ok: false, error: `Unknown action: ${action}` }, { status: 400 });
     }
