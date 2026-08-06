@@ -198,7 +198,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <Badge variant="secondary" className="mb-2">{labelFromType(listing.type)}</Badge>
-                  <h1 className="font-display text-3xl sm:text-4xl leading-[1.1]">{listing.title}</h1>
+                  <h1 className="font-display text-3xl sm:text-4xl leading-[1.1] break-words">{listing.title}</h1>
                   <p className="flex items-center gap-1 text-muted-foreground mt-2">
                     <MapPin className="w-4 h-4" />{listing.location}
                   </p>
@@ -222,7 +222,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
             {listing.description && (
               <div>
                 <h2 className="font-display text-xl mb-3">Описание</h2>
-                <p className="text-muted-foreground leading-relaxed">{listing.description}</p>
+                <p className="text-muted-foreground leading-relaxed break-words">{listing.description}</p>
               </div>
             )}
 
@@ -438,7 +438,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                 ) : (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center space-y-2">
                     <CheckCircle className="w-8 h-8 text-green-500 mx-auto" />
-                    <p className="font-medium text-green-800">Бронь отправлена!</p>
+                    <p className="font-medium text-green-800 break-words">Бронь отправлена!</p>
                     <p className="text-sm text-green-700">{listing.type === 'rental_gear' || listing.type === 'fishing' ? checkin : `${checkin} — ${checkout} · ${guests} чел.`} · {formatPrice(total)}</p>
                     <p className="text-xs text-green-600">Ожидайте подтверждения от {hostName}</p>
                     <Button variant="outline" size="sm" className="mt-1" onClick={() => router.push("/dashboard")}>В кабинет →</Button>
@@ -458,7 +458,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                     <CheckCircle className="w-4 h-4 text-accent" />
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">Организатор · {listing.rating != null ? `★ ${Number(listing.rating).toFixed(1)}` : 'Нет рейтинга'}</p>
-                  <p className="text-sm text-muted-foreground mt-2 leading-relaxed">Принимает гостей на Сахалине.</p>
+                  <p className="text-sm text-muted-foreground mt-2 leading-relaxed break-words">Принимает гостей на Сахалине.</p>
                 </div>
               </CardContent>
             </Card>
