@@ -689,7 +689,7 @@ export async function POST(req: NextRequest) {
 
       case "getBuilds": {
         const builds = await dbGetBuilds();
-        return NextResponse.json({ ok: true, builds });
+        return NextResponse.json({ ok: true, data: { builds } });
       }
       case "recordBuild": {
         if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
