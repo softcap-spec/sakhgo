@@ -24,10 +24,11 @@ import {
   ArrowLeft, Shield, Users, Store, Banknote, Wrench, CheckCircle, XCircle,
   Eye, Ban, UserCog, TrendingUp, Clock, Search, Filter, DollarSign,
   FileText, Save, Bold, Italic, Heading, List, ListOrdered,
-  Pencil, Tag, Plus, Trash2, Megaphone, Image, MessageSquare, Rocket, LayoutDashboard, BarChart3, UserPlus
+  Pencil, Tag, Plus, Trash2, Megaphone, Image, MessageSquare, Rocket, LayoutDashboard, BarChart3, UserPlus, X
 } from "lucide-react";
 import { NotificationBell } from "@/components/notification-bell";
 import { ReviewsTab } from "@/components/reviews-tab";
+import { BuildsTab } from "@/components/builds-tab";
 import { BUILD_VERSION, BUILD_HASH, BUILD_DATE } from "@/lib/build-info";
 import { PromotionsTab } from "@/components/promotions-tab";
 
@@ -249,7 +250,7 @@ export default function AdminPage() {
         }
       });
     });
-  }, [tab]); // Reload when switching tabs
+  }, [tab, store.user]); // Reload when switching tabs or user loads
 
   // Update listing counts when store changes
   useEffect(() => {
@@ -296,6 +297,7 @@ export default function AdminPage() {
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteError, setDeleteError] = useState(false);
+  const [showBuildsModal, setShowBuildsModal] = useState(false);
 
   // Role label mapping — prevents raw English keys from showing in SelectValue
   const ROLE_LABELS: Record<string, string> = {
@@ -717,7 +719,14 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
               <Rocket className="w-3 h-3" />
-              v{BUILD_VERSION} · {BUILD_DATE}
+              <button
+                onClick={() => setShowBuildsModal(true)}
+                className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 hover:bg-muted px-3 py-1.5 rounded-full transition-colors"
+                title="История сборок"
+              >
+                <Rocket className="w-3 h-3" />
+                v{BUILD_VERSION}
+              </button>
             </div>
             <NotificationBell />
           </div>
