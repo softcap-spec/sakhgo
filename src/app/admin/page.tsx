@@ -194,6 +194,14 @@ export default function AdminPage() {
   const [userSearch, setUserSearch] = useState("");
   const [userPage, setUserPage] = useState(1);
   const [userTotal, setUserTotal] = useState(0);
+  const [headerBuilds, setHeaderBuilds] = useState<BuildEntry[]>([]);
+
+  // Load builds for header version display
+  useEffect(() => {
+    import("@/lib/api").then(m => m.apiGetBuilds().then((r: any) => {
+      if (r?.builds?.length) setHeaderBuilds(r.builds);
+    }));
+  }, []);
   const USER_PAGE_SIZE = 15;
 
   // If user is logged in as admin, load data
