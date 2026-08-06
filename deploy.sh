@@ -123,5 +123,8 @@ log "Previous build: $BACKUP_DIR/.next-$TS"
 # Rotate backups — keep last 5
 ls -dt "$BACKUP_DIR"/.next-* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
 
+# ── Auto-record build ──
+node scripts/record-build.js 2>/dev/null || true
+
 echo ""
 exit 0
