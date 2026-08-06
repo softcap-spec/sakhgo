@@ -715,7 +715,7 @@ Email: support@sakhalinstay.ru · Телефон: +7 (4242) 00-00-00 · Telegram
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
               <Rocket className="w-3 h-3" />
-              v{BUILD_HISTORY[0].version} · {BUILD_HISTORY[0].date}
+              {headerBuilds.length > 0 ? `v${headerBuilds[0].version} · ${headerBuilds[0].date}` : <>v{BUILD_HISTORY[0].version} · {BUILD_HISTORY[0].date}</>}
             </div>
             <NotificationBell />
           </div>
