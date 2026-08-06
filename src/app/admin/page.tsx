@@ -248,8 +248,8 @@ export default function AdminPage() {
           setUsers(dbUsers);
           setUserTotal(result.total);
         }
-      });
-    });
+      }).catch((e: any) => console.error("Failed to load users:", e));
+    }).catch((e: any) => console.error("Failed to import API module:", e));
   }, [tab, store.user]); // Reload when switching tabs or user loads
 
   // Update listing counts when store changes
@@ -345,8 +345,8 @@ export default function AdminPage() {
           setUsers(dbUsers);
           setUserTotal(result.total);
         }
-      });
-    });
+      }).catch((e: any) => console.error("Failed to load users:", e));
+    }).catch((e: any) => console.error("Failed to import API module:", e));
   };
 
   const handleApprove = async (id: string) => {
