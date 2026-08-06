@@ -80,6 +80,7 @@ export function PromotionsTab() {
     total_impressions: 0, total_clicks: 0, total_contacts: 0, total_bookings: 0, total_revenue: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -88,14 +89,25 @@ export function PromotionsTab() {
   const [view, setView] = useState<"list" | "pricing">("list");
 
   const loadData = async (pg = page) => {
+    setError(null);
     setLoading(true);
     const { apiGetAllPromotions, apiGetPromoPricing, apiGetPromoStats } = await import("@/lib/api");
+    let apiError = false;
     const [p, pr, s] = await Promise.all([
-      apiGetAllPromotions(pg, 15).catch(() => ({ items: [], total: 0, page: 1, pageSize: 15, totalPages: 1 })),
+      apiGetAllPromotions(pg, 15).catch((e) => {
+        console.error("[PromotionsTab] API error:", e?.message || e);
+        apiError = true;
+        return { items: [], total: 0, page: 1, pageSize: 15, totalPages: 1 };
+      }),
       apiGetPromoPricing().catch(() => []),
       apiGetPromoStats().catch(() => null),
     ]);
     const items = Array.isArray(p?.items) ? p.items : Array.isArray(p) ? p : [];
+    if (apiError) {
+      setError("Сервер временно недоступен (лимит запросов). Подождите минуту и попробуйте снова.");
+      setLoading(false);
+      return;
+    }
     // Fallback: if page is empty but there are items total, reload page 1
     if (items.length === 0 && p?.total > 0 && pg > 1) {
       setPage(1);
