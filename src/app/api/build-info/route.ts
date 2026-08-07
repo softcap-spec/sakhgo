@@ -2,7 +2,13 @@ import { execSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 
+import { getSession } from "@/lib/session";
+
 export async function GET() {
+  const session = await getSession();
+  if (!session) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const hash = execSync("git rev-parse --short HEAD", { cwd: join(process.cwd()) }).toString().trim();
     const msg = execSync("git log -1 --pretty=%B", { cwd: join(process.cwd()) }).toString().trim().split("\n")[0];

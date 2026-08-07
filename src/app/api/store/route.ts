@@ -44,6 +44,7 @@ const ADMIN_ONLY = new Set([
   "testTgNotification",
   "searchProfiles",
   "getAdminStats",
+  "getBuilds",
   "deletePromotion",
   "recordBuild",
   "getMaintenanceStatus",
@@ -693,6 +694,7 @@ export async function POST(req: NextRequest) {
       }
       case "recordBuild": {
         if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+        if (session.role !== "admin") return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
         const result = await dbRecordBuild(params);
         return NextResponse.json(result);
       }
