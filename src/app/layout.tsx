@@ -1,5 +1,5 @@
 export const dynamic = "force-dynamic";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
@@ -43,6 +43,9 @@ export const metadata: Metadata = {
 
   alternates: {
     canonical: "https://sakhgo.ru",
+    languages: {
+      "ru-RU": "https://sakhgo.ru",
+    },
   },
 
   openGraph: {
@@ -70,10 +73,20 @@ export const metadata: Metadata = {
   },
 
   verification: {
-    // Add after registering: yandex, google
-    // google: "xxx",
-    // yandex: "xxx",
+    // 1. Google Search Console → добавить ресурс типа "Префикс URL" https://sakhgo.ru
+    //    → скопировать значение из HTML-тега: <meta name="google-site-verification" content="..." />
+    // google: "ЗАМЕНИТЬ_НА_КОД_ИЗ_GOOGLE_SEARCH_CONSOLE",
+    // 2. Яндекс.Вебмастер → добавить сайт → подтверждение → HTML-файл или мета-тег
+    // yandex: "ЗАМЕНИТЬ_НА_КОД_ИЗ_ЯНДЕКС_ВЕБМАСТЕР",
+    // 3. VK (для VK ID и VK Mini App)
+    // other: { "vk": "ЗАМЕНИТЬ_НА_КОД_ИЗ_VK" },
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#0ea5e9",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -106,7 +119,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   "addressRegion": "Сахалинская область",
                   "addressCountry": "RU",
                 },
-                "sameAs": [],
+                "sameAs": ["https://t.me/sakhgo", "https://vk.com/sakhgo"],
               },
               {
                 "@context": "https://schema.org",

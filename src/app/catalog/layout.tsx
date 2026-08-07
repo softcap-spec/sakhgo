@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
   title: "Каталог объявлений",
@@ -11,5 +12,15 @@ export const metadata: Metadata = {
 };
 
 export default function CatalogLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <>
+      <Suspense fallback={
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="animate-pulse text-muted-foreground">Загрузка каталога...</div>
+        </div>
+      }>
+        {children}
+      </Suspense>
+    </>
+  );
 }
