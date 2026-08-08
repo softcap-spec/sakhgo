@@ -76,7 +76,7 @@ export async function dbResetPassword(token: string, newPassword: string) {
     [token]
   );
   if (rows.length === 0) return null;
-  const hash = await bcrypt.hash(newPassword, 10);
+  const hash = await bcrypt.hash(newPassword, 12);
   await pool.query(
     "UPDATE profiles SET password_hash = $1, password_reset_token = NULL, password_reset_expires = NULL WHERE id = $2",
     [hash, rows[0].id]

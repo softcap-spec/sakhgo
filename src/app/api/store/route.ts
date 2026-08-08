@@ -586,6 +586,15 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, data: { maintenance } });
       }
       case "deletePromotion": {
+        // Defense-in-depth: explicit status check before SQL-level guard
+        const { rows: [promo] } = await pool.query(
+          "SELECT id, status, payment_id FROM promotions WHERE id = $1",
+          [params.id]
+        );
+        if (!promo) return NextResponse.json({ ok: false, error: "Promotion not found" });
+        if (promo.status === "active" || promo.status === "pending") {
+          return NextResponse.json({ ok: false, error: "Cannot delete active/pending promotion. Cancel or refund first." });
+        }
         const result = await dbDeletePromotion(params.id);
         return NextResponse.json(result);
       }

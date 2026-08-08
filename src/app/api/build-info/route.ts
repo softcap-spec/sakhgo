@@ -6,8 +6,8 @@ import { getSession } from "@/lib/session";
 
 export async function GET() {
   const session = await getSession();
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session || session.role !== "admin") {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
     const hash = execSync("git rev-parse --short HEAD", { cwd: join(process.cwd()) }).toString().trim();
