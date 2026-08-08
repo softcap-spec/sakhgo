@@ -158,7 +158,7 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
                     <img src={allImages[currentImage] || allImages[0]} alt={listing.title} className="w-full h-full object-cover" />
                     {/* Watermark */}
                     <div className="absolute bottom-4 right-4 pointer-events-none opacity-20">
-                      <img src="/logo.png" alt="" className="w-24 h-auto object-contain" />
+                      <img src="/logo.png" alt="" className="w-28 h-auto object-contain" />
                     </div>
                   </>
                 ) : (

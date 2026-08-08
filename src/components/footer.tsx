@@ -11,7 +11,7 @@ export function Footer() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 mb-10">
           <div className="lg:col-span-1">
             <div className="flex items-center gap-2 mb-3">
-              <img src="/logo.png" alt="СахGO" className="h-12 w-auto" />
+              <img src="/logo.png" alt="СахGO" className="h-14 w-auto" />
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
               Маркетплейс туруслуг, рыбалки и жилья для Сахалинской области и Курильских островов.

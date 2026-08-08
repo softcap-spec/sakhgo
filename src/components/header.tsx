@@ -46,7 +46,7 @@ export function Header() {
           onClick={() => { setMobileOpen(false); router.push("/"); }}
           className="flex items-center gap-2 shrink-0"
         >
-          <img src="/logo.png" alt="СахGO" className="h-10 sm:h-12 w-auto" />
+          <img src="/logo.png" alt="СахGO" className="h-12 sm:h-14 w-auto" />
         </button>
 
         {/* Nav Tabs — desktop */}
