@@ -1434,7 +1434,7 @@ export async function dbGetAdminStats(): Promise<AdminStats> {
         (SELECT COUNT(*) FROM listings WHERE active = true)::int AS "activeListings",
         (SELECT COUNT(*) FROM pending_edits WHERE status = 'pending')::int AS "pendingEdits",
         (SELECT COUNT(*) FROM bookings)::int AS "totalBookings",
-        COALESCE((SELECT SUM(price) FROM promotions WHERE status = 'paid'), 0)::int AS "promoRevenue"`
+        COALESCE((SELECT SUM(price) FROM promotions WHERE status IN ('paid','active')), 0)::int AS "promoRevenue"`
     ),
     pool.query(
       `SELECT
